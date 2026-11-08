@@ -139,7 +139,7 @@ section.sec > h2::after { order: 2; }
 .chap-hd .cnts { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .chap .st-h { padding: 8px 18px 4px; font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; font-weight: 700; border-top: 1px solid var(--line-2); }
 .chap .st-h.added { color: var(--add-ink); } .chap .st-h.modified { color: var(--med); } .chap .st-h.removed { color: var(--del-ink); }
-.urow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 9px 18px 10px; border-top: 1px solid var(--line-2); align-items: start; scroll-margin-top: 90px; }
+.urow { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 12px; padding: 9px 18px 10px; border-top: 1px solid var(--line-2); align-items: start; scroll-margin-top: 90px; }
 .st-h + .urow { border-top: 0; }
 .urow .nm { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--ink); }
 .urow .what { font-size: 14px; color: var(--ink); margin-top: 3px; }
@@ -178,10 +178,19 @@ section.sec > h2::after { order: 2; }
 /* ---------- rows ---------- */
 .row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; padding: 11px 16px; border-top: 1px solid var(--line-2); align-items: start; }
 .row:first-child { border-top: 0; }
-.row.done > .body, .constrow.done > .body { opacity: .5; }
-.card.ent.done > :not(.hd), .card.ent.done .hd > div { opacity: .5; }
-.fileblock.done .fh > div, .fileblock.done .fh .stats { opacity: .5; }
-.routes .r.done > .body { opacity: .5; }
+/* reviewed (checked) items collapse to their title line; click the line to peek, untick to restore */
+.done:not(.peek) .title, .done:not(.peek) .nm, .done:not(.peek) .p, .done:not(.peek) .path { opacity: .55; }
+.row.done:not(.peek) > .body > :not(.title), .row.done:not(.peek) > .diff,
+.constrow.done:not(.peek) > .body > :not(.title), .constrow.done:not(.peek) > .diff,
+.routes .r.done:not(.peek) > .body > :not(.p), .routes .r.done:not(.peek) > .diff,
+.card.ent.done:not(.peek) > :not(.hd), .card.ent.done:not(.peek) .hd .sub,
+.card.bl.done:not(.peek) > :not(.row),
+.fileblock.done:not(.peek) > :not(.fh), .fileblock.done:not(.peek) .fh .why,
+.urow.done:not(.peek) > .ubody > :not(:first-child), .urow.done:not(.peek) > .diff, .urow.done:not(.peek) > .ftable { display: none; }
+.row.done:not(.peek), .constrow.done:not(.peek), .urow.done:not(.peek) { padding-top: 7px; padding-bottom: 7px; cursor: pointer; }
+.card.ent.done:not(.peek) .hd, .card.bl.done:not(.peek) { cursor: pointer; }
+.tg-hd .rv { font-weight: 500; font-size: 12px; color: var(--muted); }
+.tg-hd .rv.all { color: var(--add-ink); }
 .row .title { font-weight: 560; color: var(--ink); }
 .row .detail { color: var(--ink-2); font-size: 13px; margin-top: 2px; white-space: pre-line; }
 .loc { font-family: var(--mono); font-size: 11.5px; color: var(--muted); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 38ch; direction: rtl; text-align: right; }
@@ -438,16 +447,44 @@ function loadReviewed() { try { reviewed = JSON.parse(localStorage.getItem(store
 function saveReviewed() { try { localStorage.setItem(storeKey(), JSON.stringify(reviewed)); } catch {} updateProgress(); }
 
 function check(id, rowEl) {
-  const c = h("input", { type: "checkbox", class: "chk", title: "Mark reviewed" });
+  const c = h("input", { type: "checkbox", class: "chk", title: "Mark reviewed (collapses it)" });
+  c.dataset.rid = id;
   c.checked = !!reviewed[id];
-  if (rowEl && c.checked) rowEl.classList.add("done");
+  c.addEventListener("click", e => e.stopPropagation());
+  if (rowEl) {
+    rowEl.dataset.rid = id;
+    if (c.checked) rowEl.classList.add("done");
+    rowEl.addEventListener("click", e => {          // click a collapsed item to peek at it
+      if (!rowEl.classList.contains("done") || e.target.closest("a, button, input, textarea, .loc, .diff, .ftable")) return;
+      rowEl.classList.toggle("peek");
+    });
+  }
   c.addEventListener("change", () => {
     if (c.checked) reviewed[id] = 1; else delete reviewed[id];
-    rowEl && rowEl.classList.toggle("done", c.checked);
+    for (const el of document.querySelectorAll(`[data-rid="${CSS.escape(id)}"]`)) {
+      if (el.tagName === "INPUT") el.checked = c.checked;
+      else { el.classList.toggle("done", c.checked); el.classList.remove("peek"); }
+    }
     saveReviewed();
     renderRailFiles();
+    syncGroups(c.checked ? c.closest(".tgroup") : null);
   });
   return c;
+}
+
+// Group headers show "n/m reviewed"; ticking the last item in a group closes it.
+function syncGroups(justFinished) {
+  for (const g of document.querySelectorAll(".tgroup")) {
+    const items = [...g.querySelectorAll(".tg-body [data-rid]:not(input)")];
+    const hd = g.querySelector(".tg-hd");
+    let rv = hd.querySelector(".rv");
+    if (!items.length) { if (rv) rv.remove(); continue; }
+    const done = items.filter(el => el.classList.contains("done")).length;
+    if (!rv) { rv = h("span", { class: "rv" }); hd.querySelector(".cnt").after(rv); }
+    rv.textContent = done ? (done === items.length ? `✓ ${done}/${items.length}` : `${done}/${items.length} reviewed`) : "";
+    rv.classList.toggle("all", done === items.length);
+    if (g === justFinished && done === items.length) { g.classList.remove("open"); groupOpen[g.dataset.key] = false; }
+  }
 }
 
 function reviewables() {
@@ -734,11 +771,11 @@ function renderLogic() {
   const build = sub => {
     const out = [];
     for (const { _bl: b } of sub.filter(x => x._bl)) {
-      const c = h("div", { class: "card" });
+      const c = h("div", { class: "card bl" });
       const hd = h("div", { class: "row" });
       const body = h("div", { class: "body" }, h("div", { class: "title" }, b.title));
       const t = codeToggle(c, b.hunks, "show code");
-      hd.append(check("bl:" + b.title, hd), body, t || h("span"));
+      hd.append(check("bl:" + b.title, c), body, t || h("span"));
       c.append(hd, h("div", { class: "ba" }, h("div", {}, h("h5", {}, "Before"), b.before || "—"), h("div", {}, h("h5", {}, "After"), b.after || "—")));
       if (b.why_it_matters) c.append(h("div", { class: "why" }, h("b", {}, "Why it matters  "), b.why_it_matters));
       out.push(c);
@@ -1072,7 +1109,7 @@ async function startModelPass() {
 function unitRow(u, ai) {
   const row = h("div", { class: "urow", id: "unit-" + u.id });
   const c0 = R.changes.find(c => c.id === u.change_ids[0]);
-  const body = h("div", {},
+  const body = h("div", { class: "ubody" },
     h("div", {}, h("span", { class: "nm" }, u.name), " ", h("span", { class: "st " + u.status }, STATUS_WORD[u.status] || u.status), " ",
       h("span", { class: "fw" }, u.kind === "function" && u.chapter === "background" && u.detail.includes("steps") ? "workflow" : u.kind),
       u.used_by_routes ? h("span", { class: "tag-route", title: "Referenced by changed route/controller code" }, " used by routes") : null),
@@ -1092,7 +1129,7 @@ function unitRow(u, ai) {
   const t = codeToggle(body, u.hunk_ids);
   if (t) meta.append(t);
   if (meta.childNodes.length) body.append(meta);
-  row.append(body, loc(u.file, u.line) || h("span"));
+  row.append(check(`s:${u.chapter}:${u.name}`, row), body, loc(u.file, u.line) || h("span"));
   return row;
 }
 function renderStory() {
@@ -1170,6 +1207,7 @@ function render() {
   if (R.errors && R.errors.length) main.append(h("div", { class: "card", style: "padding:10px 16px;margin-bottom:16px;color:var(--high);font-size:13px" }, R.errors.join("\n")));
   main.append(renderOverview(), renderStory(), renderRisks(), renderLogic(), renderLayer("database"), renderLayer("schemas"), renderInterfaces(), renderFunctions(), renderFiles());
   updateBack();
+  syncGroups();
   window.scrollTo(0, y);
   updateProgress();
   observeSections();
