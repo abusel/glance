@@ -111,6 +111,15 @@ section.sec > h2::after { order: 2; }
 .backbtn.on { display: inline-flex; }
 .backbtn:hover { border-color: var(--accent); color: var(--accent); }
 
+/* ---------- intent ---------- */
+.intentcard .asked { display: block; line-height: 1.55; }
+.intent-text { color: var(--ink); white-space: pre-line; }
+.intent-empty { color: var(--muted); }
+.intent-edit { padding: 0 18px 14px; }
+.intent-in { width: 100%; font: 14px/1.5 var(--sans); color: var(--ink); background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; resize: vertical; }
+.intent-in:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.intent-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+
 /* ---------- story ---------- */
 .goal { padding: 20px 22px; }
 .goal .lead { font-size: 18px; line-height: 1.55; letter-spacing: -.01em; color: var(--ink); max-width: 90ch; }
@@ -639,21 +648,7 @@ function renderOverview() {
   else if (llm.status === "skipped") card.append(h("div", { class: "llm-state" }, "Static analysis only. " + (llm.reason === "disabled" ? "Model pass disabled." : "Install the `claude` CLI or set ANTHROPIC_API_KEY for summaries, intent check and business-logic review.")));
 
   const out = [card];
-  const it = llm.status === "ok" ? llm.intent : null;
-  if (it && (it.asked || (it.done || []).length)) {
-    const ic = h("div", { class: "card" });
-    if (it.asked) ic.append(h("div", { class: "asked" }, h("b", {}, "Asked"), it.asked));
-    const col = (cls, title, items, render) => h("div", { class: cls }, h("h4", {}, title), items && items.length ? h("ul", {}, items.map(render)) : h("div", { class: "empty" }, "—"));
-    ic.append(h("div", { class: "intent" },
-      col("done", "Done", it.done, d => h("li", {}, d)),
-      col("extra", "Not asked for", it.extra, e => {
-        const li = h("li", {}, typeof e === "string" ? e : e.text, " ");
-        if (e.hunks && e.hunks.length) { const t = codeToggle(li, e.hunks, "code"); li.append(t); }
-        return li;
-      }),
-      col("missing", "Missing", it.missing, m => h("li", {}, m))));
-    out.push(h("div", { style: "height:10px" }), ic);
-  }
+  out.push(h("div", { style: "height:10px" }), intentCard());
   if (llm.status === "ok" && (llm.walkthrough || []).length) {
     const wc = h("div", { class: "card walk" });
     wc.append(h("div", { class: "asked" }, h("b", {}, "Read in this order")));
@@ -1002,6 +997,61 @@ function fileCards(files) {
   return out;
 }
 
+// ------------------------------------------------------------------ intent ("what was this supposed to do?")
+let intentEditing = false;
+async function saveIntent(text) {
+  try {
+    const r = await fetch("/api/intent", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ intent: text }) });
+    const j = await r.json();
+    intentEditing = false;
+    R.intent = text.trim() || null;
+    if (j.status === "running") { R.llm = { ...(R.llm || {}), status: "running" }; toast("Checking the change against the task — a few minutes"); render(); poll(); }
+    else if (j.status === "cleared") { R.llm = { ...(R.llm || {}), intent: null }; toast("Task cleared"); render(); }
+    else { toast("Task saved. AI isn't available, so the check didn't run"); render(); }
+  } catch { toast("Couldn't reach the glance server"); }
+}
+function intentCard() {
+  const llm = R.llm || {};
+  const it = llm.status === "ok" ? llm.intent : null;
+  const card = h("div", { class: "card intentcard" });
+  const head = h("div", { class: "asked" }, h("b", {}, "Task"));
+  if (intentEditing) {
+    const ta = h("textarea", { class: "intent-in", rows: 5, placeholder: "Paste the task, ticket or plan the change was meant to carry out. Glance's AI will check what was done, what's missing, and what was added that nobody asked for." });
+    ta.value = R.intent || "";
+    card.append(head, h("div", { class: "intent-edit" }, ta,
+      h("div", { class: "intent-actions" },
+        h("button", { class: "btn ai", onclick: () => saveIntent(ta.value) }, "Check the change against this"),
+        h("button", { class: "btn", onclick: () => { intentEditing = false; render(); } }, "Cancel"),
+        R.intent ? h("button", { class: "btn", onclick: () => saveIntent("") }, "Remove task") : null)));
+    setTimeout(() => ta.focus(), 0);
+    return card;
+  }
+  if (!R.intent) {
+    head.append(h("span", { class: "intent-empty" }, "What was this change supposed to do? Give glance the task and it will check the change against it."));
+    if (!STATIC) head.append(" ", h("button", { class: "toggle", onclick: () => { intentEditing = true; render(); } }, "Add the task"));
+    card.append(head);
+    return card;
+  }
+  head.append(h("span", { class: "intent-text" }, R.intent.length > 400 ? R.intent.slice(0, 400) + "…" : R.intent));
+  if (!STATIC) head.append(" ", h("button", { class: "toggle", onclick: () => { intentEditing = true; render(); } }, "edit"));
+  card.append(head);
+  if (llm.status === "running") card.append(h("div", { class: "llm-state" }, h("span", { class: "spin" }), "Checking the change against this task…"));
+  else if (it && ((it.done || []).length || (it.extra || []).length || (it.missing || []).length)) {
+    const col = (cls, title, items, render) => h("div", { class: cls }, h("h4", {}, title), items && items.length ? h("ul", {}, items.map(render)) : h("div", { class: "empty" }, "—"));
+    card.append(h("div", { class: "intent" },
+      col("done", "Done", it.done, d => h("li", {}, d)),
+      col("missing", "Missing from the task", it.missing, m => h("li", {}, m)),
+      col("extra", "Done but not in the task", it.extra, e => {
+        const li = h("li", {}, typeof e === "string" ? e : e.text, " ");
+        if (e.hunks && e.hunks.length) li.append(codeToggle(li, e.hunks, "code"));
+        return li;
+      })));
+  } else if (!STATIC) {
+    card.append(h("div", { class: "llm-state" }, "Not checked against this task yet. ", h("button", { class: "btn ai", onclick: () => saveIntent(R.intent) }, "Check now")));
+  }
+  return card;
+}
+
 // ------------------------------------------------------------------ story
 const STATUS_WORD = { added: "New", modified: "Changed", removed: "Removed" };
 function jumpUnit(id) {
@@ -1184,7 +1234,7 @@ async function boot() {
   if (!STATIC && (R.llm || {}).status === "running") poll();
 }
 document.addEventListener("keydown", e => {
-  if (e.target.tagName === "INPUT" || e.metaKey || e.ctrlKey) return;
+  if (["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName) || e.target.isContentEditable || e.metaKey || e.ctrlKey) return;
   if (e.key === "r" && !STATIC) refresh();
   if (e.key === "Backspace" && backStack.length) { e.preventDefault(); goBack(); }
 });

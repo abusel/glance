@@ -9,11 +9,13 @@ Providers (auto-detected in this order):
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import shutil
 import subprocess
+from pathlib import Path
 from typing import Any
 
 DEFAULT_MODEL = os.environ.get("GLANCE_MODEL", "claude-sonnet-5-5")
@@ -34,7 +36,8 @@ Rules:
   mismatch between code and the stated intent). Don't repeat the static risk flags unless you add something.
   Don't pad: zero concerns is a fine answer.
 - If an intent/task is given, compare it to what the diff actually does: what was asked, what was done,
-  what was done that wasn't asked (scope creep), and what was asked but is missing.
+  what was done that wasn't asked (scope creep), and what was asked but is missing. If NO intent is given,
+  return "intent": null. Never infer the task from commit messages or branch names.
 - Be terse. Plain English. No markdown inside strings.
 
 The "story" explains the change the way a teammate would walk someone through a feature: first the goal, then
@@ -103,6 +106,8 @@ def build_prompt(report: dict) -> str:
     parts = [INSTRUCTIONS, ""]
     if report.get("intent"):
         parts += ["## Intent / task given for this change", report["intent"].strip()[:8000], ""]
+    else:
+        parts += ["## Intent / task given for this change", "(none given: return \"intent\": null)", ""]
     if report.get("commits"):
         parts += ["## Commit messages", "\n".join("- " + c.splitlines()[0] for c in report["commits"][:30]), ""]
     parts += ["## Static summary", report["summary"]["headline"], *("- " + b for b in report["summary"]["bullets"]), ""]
@@ -247,6 +252,13 @@ def run(report: dict, provider: str = "auto", model: str | None = None, timeout:
         return {"status": "skipped", "reason": reason}
     prompt = build_prompt(report)
     valid = {h["id"] for f in report["files"] for h in f["hunks"]}
+    # Same diff + same task + same model = same answer: reuse it instead of paying minutes and tokens again.
+    cache = Path(report["repo_path"]) / ".glance" / "llm-cache" / (hashlib.sha256(f"{prov}|{model}|{prompt}".encode()).hexdigest()[:24] + ".json")
+    if cache.is_file():
+        try:
+            return {**json.loads(cache.read_text()), "cached": True}
+        except (OSError, ValueError):
+            pass
     try:
         if prov == "claude-cli":
             raw = _call_claude_cli(prompt, report["repo_path"], model, timeout)
@@ -257,6 +269,16 @@ def run(report: dict, provider: str = "auto", model: str | None = None, timeout:
         return {"status": "error", "provider": prov, "error": f"timed out after {timeout}s"}
     except Exception as e:
         return {"status": "error", "provider": prov, "error": str(e)[:500]}
+    if not report.get("intent"):
+        data["intent"] = None          # the scope check only means something against a stated task
     data, dropped = ground(data, valid, {u["id"] for u in (report.get("story") or {}).get("units", [])})
-    return {"status": "ok", "provider": prov, "model": model or ("default" if prov == "claude-cli" else DEFAULT_MODEL),
-            "prompt_chars": len(prompt), "dropped_ungrounded": dropped, **data}
+    result = {"status": "ok", "provider": prov, "model": model or ("default" if prov == "claude-cli" else DEFAULT_MODEL),
+              "prompt_chars": len(prompt), "dropped_ungrounded": dropped, **data}
+    try:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps(result))
+        for old in sorted(cache.parent.glob("*.json"), key=lambda q: q.stat().st_mtime)[:-20]:
+            old.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return result

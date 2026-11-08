@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import threading
 import time
@@ -63,18 +64,28 @@ def export_html(report: dict) -> str:
     return html.replace("<script>\n(() => {", f"<script>window.__GLANCE_REPORT__ = {data};</script>\n<script>\n(() => {{", 1)
 
 
-def _read_intent(args) -> str | None:
+def intent_path(repo: Path, args) -> Path:
+    """Where the UI saves "what was this change supposed to do?" — one file per branch."""
+    ref = (args.head or git(repo, "symbolic-ref", "--short", "-q", "HEAD", check=False).strip()      # works before the first commit
+           or git(repo, "rev-parse", "--short", "HEAD", check=False).strip() or "HEAD")              # detached: the commit
+    return repo / ".glance" / "intent" / (re.sub(r"[^A-Za-z0-9._-]+", "_", ref) + ".md")
+
+
+def _read_intent(args, repo: Path) -> str | None:
     parts = []
     if args.intent:
         parts.append(args.intent)
     if args.intent_file:
         parts.append(Path(args.intent_file).read_text(errors="replace"))
-    return "\n\n".join(parts) or None
+    if parts:
+        return "\n\n".join(parts)
+    saved = intent_path(repo, args)
+    return (saved.read_text(errors="replace").strip() or None) if saved.is_file() else None
 
 
 def build(args, repo: Path) -> dict:
     cs = collect(repo, base=args.base, head=args.head, include_untracked=not args.no_untracked)
-    return analyze(cs, with_callers=not args.no_callers, intent=_read_intent(args))
+    return analyze(cs, with_callers=not args.no_callers, intent=_read_intent(args, repo))
 
 
 def cmd_review(args) -> int:
@@ -151,6 +162,27 @@ def cmd_review(args) -> int:
         return True
 
     state.run_model = run_model_now
+
+    def set_intent(text: str) -> str:
+        """Save the task for this branch; re-run the model pass against it (or clear the old intent check)."""
+        text = text.strip()
+        p = intent_path(repo, args)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if text:
+            p.write_text(text + "\n")
+        else:
+            p.unlink(missing_ok=True)
+        args.intent, args.intent_file = None, None      # the saved file is now the source of truth
+        rep = dict(state.get())
+        rep["intent"] = text or None
+        if not text:
+            rep["llm"] = {**(rep.get("llm") or {}), "intent": None}
+            state.set(rep)
+            return "cleared"
+        state.set(rep)
+        return "running" if run_model_now() else "saved"
+
+    state.set_intent = set_intent
     _write(repo, report)
     if run_llm:
         report["llm"] = {"status": "running", "provider": llm.available_provider(args.llm)}

@@ -309,3 +309,35 @@ def test_story_grounding_drops_unknown_units():
     assert out["how_it_works"] == [{"text": "cited", "units": ["u1"]}]
     assert set(out["units"]) == {"u1"} and set(out["chapters"]) == {"database"}
     assert ground_story("not a dict", {"u1"}) == {}
+
+
+def test_no_intent_means_no_scope_check(py_report, monkeypatch):
+    import glance.llm as L
+
+    fake = '{"summary": "s", "intent": {"asked": "guessed from commits", "done": ["x"], "extra": [], "missing": []}, "business_logic": [], "concerns": [], "walkthrough": []}'
+    monkeypatch.setattr(L, "available_provider", lambda p="auto": "claude-cli")
+    monkeypatch.setattr(L, "_call_claude_cli", lambda *a, **k: fake)
+    rep = dict(py_report, intent=None)
+    assert "none given" in L.build_prompt(rep)
+    calls = []
+    monkeypatch.setattr(L, "_call_claude_cli", lambda *a, **k: calls.append(1) or fake)
+    assert L.run(rep)["intent"] is None                          # model guessed one anyway: dropped
+    assert L.run(dict(py_report, intent="Add loans"))["intent"]["asked"] == "guessed from commits"
+    again = L.run(dict(py_report, intent="Add loans"))           # same diff + task: served from cache
+    assert again.get("cached") and len(calls) == 2
+
+
+def test_saved_intent_is_per_branch(tmp_path):
+    import argparse
+    import subprocess
+
+    from glance.cli import _read_intent, intent_path
+
+    subprocess.run(["git", "init", "-q", "-b", "feature/x"], cwd=tmp_path, check=True)
+    args = argparse.Namespace(intent=None, intent_file=None, head=None)
+    assert _read_intent(args, tmp_path) is None
+    p = intent_path(tmp_path, args)
+    assert p.name == "feature_x.md"
+    p.parent.mkdir(parents=True); p.write_text("Add a $2 fee\n")
+    assert _read_intent(args, tmp_path) == "Add a $2 fee"
+    assert _read_intent(argparse.Namespace(intent="cli wins", intent_file=None, head=None), tmp_path) == "cli wins"

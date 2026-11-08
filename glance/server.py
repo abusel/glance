@@ -23,6 +23,7 @@ class State:
         self.lock = threading.Lock()
         self.rebuilding = False
         self.run_model: Callable[[], bool] | None = None
+        self.set_intent: Callable[[str], str] | None = None
 
     def get(self) -> dict[str, Any]:
         with self.lock:
@@ -110,6 +111,17 @@ def make_handler(state: State):
             u = urlparse(self.path)
             if u.path == "/api/open":
                 return self._open_in_editor()
+            if u.path == "/api/intent":
+                if not self._same_origin():
+                    return self._send(403, b'{"error":"cross-origin"}')
+                if not state.set_intent:
+                    return self._send(404, b'{"error":"not available"}')
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    text = str(json.loads(self.rfile.read(min(n, 100_000)) or b"{}").get("intent") or "")
+                except (ValueError, TypeError):
+                    return self._send(400, b'{"error":"bad request"}')
+                return self._send(200, json.dumps({"status": state.set_intent(text)}).encode())
             if u.path == "/api/llm":
                 if not self._same_origin():
                     return self._send(403, b'{"error":"cross-origin"}')
