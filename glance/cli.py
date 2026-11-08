@@ -131,11 +131,17 @@ def cmd_review(args) -> int:
     def model_pass(rep: dict) -> None:
         rep["llm"] = {"status": "running", "provider": llm.available_provider(args.llm)}
         state.set(rep)
-        rep2 = dict(rep)
-        rep2["llm"] = llm.run(rep, provider=args.llm, model=args.model)
-        if state.get().get("id") == rep["id"]:
-            state.set(rep2)
-            _write(repo, rep2)
+        result = llm.run(rep, provider=args.llm, model=args.model)
+        cur = dict(state.get())
+        if cur.get("id") != rep["id"]:
+            return                                  # a refresh replaced the report; its own pass will run
+        if cur.get("intent") and cur.get("intent") != rep.get("intent"):
+            return model_pass(cur)                  # the task was set mid-run: answer against the new one
+        if not cur.get("intent") and isinstance(result.get("intent"), dict):
+            result = {**result, "intent": None}     # the task was removed mid-run
+        cur["llm"] = result                         # merge into the live report, never overwrite newer state
+        state.set(cur)
+        _write(repo, cur)
 
     def rebuild() -> None:
         rep = build(args, repo)
@@ -180,6 +186,8 @@ def cmd_review(args) -> int:
             state.set(rep)
             return "cleared"
         state.set(rep)
+        if (rep.get("llm") or {}).get("status") == "running":
+            return "running"                        # the pass in flight re-runs against the new task
         return "running" if run_model_now() else "saved"
 
     state.set_intent = set_intent
