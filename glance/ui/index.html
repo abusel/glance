@@ -82,6 +82,35 @@ section.sec > h2::after { content: ""; flex: 1; height: 1px; background: var(--l
 .grid2 > .card { margin-top: 0; }
 .empty { color: var(--faint); font-size: 13px; padding: 4px 2px; }
 
+/* ---------- topics, groups, back ---------- */
+.rail a.topic { display: flex; justify-content: space-between; align-items: center; padding: 4px 9px; border-radius: 6px; text-decoration: none; color: var(--ink-2); cursor: pointer; }
+.rail a.topic:hover { background: var(--panel); }
+.rail a.topic.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.rail a.topic span.n { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.rail a.topic .dot { margin-left: 6px; }
+section.sec > h2 { cursor: pointer; user-select: none; }
+section.sec > h2 .chev, .tg-hd .chev { display: inline-block; transition: transform .15s; color: var(--faint); font-size: 10px; }
+section.sec:not(.collapsed) > h2 .chev, .tgroup.open > .tg-hd .chev { transform: rotate(90deg); }
+section.sec.collapsed > :not(h2) { display: none; }
+section.sec > h2 .ctl { order: 3; display: flex; gap: 10px; text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 12px; }
+section.sec > h2 .ctl button { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font-size: 12px; }
+section.sec > h2 .ctl button:hover { text-decoration: underline; }
+section.sec > h2 .fl { order: 1; color: var(--accent); text-transform: none; letter-spacing: 0; font-weight: 600; font-size: 12px; }
+section.sec > h2::after { order: 2; }
+.tgroup + .tgroup { margin-top: 8px; }
+.tg-hd { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: var(--shadow); padding: 9px 14px; cursor: pointer; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.tg-hd:hover { border-color: var(--faint); }
+.tg-hd .cnt { color: var(--muted); font-weight: 400; font-size: 12.5px; }
+.tg-hd .spacer { flex: 1; }
+.tg-hd .peek { color: var(--faint); font-weight: 400; font-size: 12px; font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tgroup:not(.open) > .tg-body { display: none; }
+.tg-body { margin: 8px 0 18px; padding-left: 14px; border-left: 2px solid var(--accent-soft); }
+.backbtn { position: fixed; right: 22px; bottom: 22px; z-index: 40; display: none; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: 0 4px 16px rgba(0,0,0,.12); cursor: pointer; font-size: 13px; color: var(--ink); }
+.backbtn.on { display: inline-flex; }
+.backbtn:hover { border-color: var(--accent); color: var(--accent); }
+
 /* ---------- overview ---------- */
 .hero { padding: 18px 20px; }
 .hero .headline { font-size: 13px; color: var(--muted); margin-bottom: 8px; font-variant-numeric: tabular-nums; }
@@ -252,6 +281,7 @@ table.f tr.same td { color: var(--muted); }
   <main id="main"><div class="empty" style="padding:40px 0">Loading report…</div></main>
 </div>
 <div class="toast" id="toast"></div>
+<button class="backbtn" id="backbtn" title="Back to where you were (Backspace)">↩ Back</button>
 <script>
 (() => {
 "use strict";
@@ -260,6 +290,10 @@ let HUNKS = {};                // id -> {file, hunk}
 let FILES = {};                // path -> file
 let reviewed = {};
 let riskFilter = "all";
+let topicFilter = "all";        // topic id, or "all"
+const groupOpen = {};           // "section:topic" -> bool (user's choice survives re-render)
+const secCollapsed = {};        // section id -> bool
+const backStack = [];           // scroll positions to return to
 const STATIC = !!window.__GLANCE_REPORT__;
 
 // ------------------------------------------------------------------ helpers
@@ -297,6 +331,63 @@ function editorLink(path, line, label = "VS Code ↗") {
   return h("a", { class: "ed", href: editorHref(path, line), title: `Open ${path}${line ? ":" + line : ""} in VS Code`,
     onclick: e => { e.preventDefault(); e.stopPropagation(); openInEditor(path, line); } }, label);
 }
+// ------------------------------------------------------------------ topics
+function topicOf(x) { return x.topic || (x.file && FILES[x.file] && FILES[x.file].topic) || "other"; }
+function topicLabel(t) { const x = (R.topics || []).find(x => x.id === t); return x ? x.label : (t === "other" ? "Other" : t); }
+function inTopic(x) { return topicFilter === "all" || topicOf(x) === topicFilter; }
+function topicSeverity(t) {
+  const rs = R.risks.filter(r => topicOf(r) === t);
+  return rs.some(r => r.severity === "high") ? "high" : rs.some(r => r.severity === "medium") ? "medium" : rs.length ? "low" : "none";
+}
+function setTopic(t) {
+  topicFilter = topicFilter === t ? "all" : t;
+  render();
+  document.getElementById("main").scrollIntoView({ block: "start" });
+}
+
+// Split a section's items into collapsible per-topic groups (items keep the section's own order; groups are
+// ordered by their first item, so the group holding the most important item comes first).
+function topicGroups(sec, items, build, peek) {
+  const kids = x => [].concat(x).filter(Boolean);
+  const topics = [...new Set(items.map(topicOf))];
+  if (topics.length <= 1) return kids(build(items));
+  const collapse = items.length > 8;
+  return topics.map(t => {
+    const sub = items.filter(x => topicOf(x) === t);
+    const key = sec + ":" + t;
+    const open = key in groupOpen ? groupOpen[key] : !collapse;
+    const g = h("div", { class: "tgroup" + (open ? " open" : ""), id: `g-${sec}-${t}`, "data-key": key });
+    const sev = topicSeverity(t);
+    const hd = h("button", { class: "tg-hd", onclick: () => { const o = g.classList.toggle("open"); groupOpen[key] = o; } },
+      h("span", { class: "chev" }, "▶"), topicLabel(t), h("span", { class: "cnt" }, String(sub.length)),
+      sev !== "none" ? h("span", { class: "dot " + sev, title: `${sev}-severity risk in this topic` }) : null,
+      h("span", { class: "peek" }, peek ? (sub.slice(0, 4).map(peek).filter(Boolean).join(" · ") + (sub.length > 4 ? " · …" : "")).replace(/^ · …$/, "") : ""),
+      h("span", { class: "spacer" }));
+    g.append(hd, h("div", { class: "tg-body" }, ...kids(build(sub))));
+    return g;
+  });
+}
+
+// ------------------------------------------------------------------ back
+function rememberSpot() {
+  const y = window.scrollY;
+  if (!backStack.length || Math.abs(backStack[backStack.length - 1] - y) > 40) backStack.push(y);
+  if (backStack.length > 50) backStack.shift();
+  updateBack();
+}
+function goBack() {
+  if (!backStack.length) return;
+  window.scrollTo({ top: backStack.pop(), behavior: "smooth" });
+  updateBack();
+}
+function updateBack() { const b = document.getElementById("backbtn"); if (b) b.classList.toggle("on", backStack.length > 0); }
+function reveal(el) {    // open whatever collapsed section/group hides el
+  for (let p = el; p; p = p.parentElement) {
+    if (p.classList?.contains("tgroup") && !p.classList.contains("open")) { p.classList.add("open"); groupOpen[p.dataset.key] = true; }
+    if (p.tagName === "SECTION" && p.classList.contains("collapsed")) { p.classList.remove("collapsed"); secCollapsed[p.id] = false; }
+  }
+}
+
 function toast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.classList.add("on"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("on"), 1800); }
 
 function storeKey() { return `glance:${R.repo_path}:${R.base.rev}:${R.head.ref}`; }
@@ -380,8 +471,11 @@ function codeToggle(container, hunkIds, label = "show code", opts = {}) {
 }
 
 function jumpFile(path) {
+  if (topicFilter !== "all" && FILES[path] && topicOf(FILES[path]) !== topicFilter) { topicFilter = "all"; render(); }
   const el = document.getElementById("file-" + (FILES[path] || {}).rank);
   if (!el) return;
+  rememberSpot();
+  reveal(el);
   if (!el._open) el.querySelector(".fh").click();
   el.scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -415,35 +509,56 @@ function renderTop() {
 }
 
 const SECTIONS = [
-  ["overview", "Overview"], ["risks", "Risks"], ["logic", "Business logic"], ["data", "Data layer"],
+  ["overview", "Overview"], ["risks", "Risks"], ["logic", "Business logic"], ["database", "Database"], ["schemas", "Schemas & types"],
   ["interfaces", "Endpoints & tasks"], ["functions", "Functions"], ["files", "Files"],
 ];
 function sectionCounts() {
   const llm = R.llm || {};
-  const k = kinds => R.changes.filter(c => kinds.includes(c.kind)).length;
+  const ch = R.changes.filter(inTopic);
+  const k = kinds => ch.filter(c => kinds.includes(c.kind)).length;
+  const blTopic = b => topicOf({ file: HUNKS[(b.hunks || [])[0]]?.file });
   return {
     overview: "",
-    risks: R.risks.length + (llm.concerns || []).length,
-    logic: (llm.business_logic || []).length + R.changes.filter(c => ["config", "agent"].includes(c.kind) && c.status !== "removed").length,
-    data: k(["migration", "table", "model", "type"]),
+    risks: riskItems().filter(inTopic).length,
+    logic: (llm.business_logic || []).filter(b => topicFilter === "all" || blTopic(b) === topicFilter).length + ch.filter(c => ["config", "agent"].includes(c.kind) && c.status !== "removed").length,
+    database: ch.filter(c => c.layer === "database").length,
+    schemas: ch.filter(c => c.layer === "schema").length,
     interfaces: k(["route", "task", "env", "dependency"]),
-    functions: functionChanges().length,
-    files: R.files.length,
+    functions: functionChanges().filter(inTopic).length,
+    files: R.files.filter(inTopic).length,
   };
 }
+
 function renderRail() {
   const rail = document.getElementById("rail");
   rail.innerHTML = "";
   const counts = sectionCounts();
-  const hot = R.risks.some(r => r.severity === "high") || (R.llm?.concerns || []).some(c => c.severity === "high");
+  const hot = riskItems().filter(inTopic).some(r => r.severity === "high");
+  const topics = R.topics || [];
+  if (topics.length > 1) {
+    rail.append(h("h6", {}, "Topics"));
+    rail.append(h("a", { class: "topic" + (topicFilter === "all" ? " on" : ""), onclick: () => setTopic("all") }, h("span", {}, "Everything"), h("span", { class: "n" }, R.changes.length)));
+    for (const t of topics) {
+      const sev = topicSeverity(t.id);
+      rail.append(h("a", { class: "topic" + (topicFilter === t.id ? " on" : ""), title: `Show only ${t.label} (click again for everything)`, onclick: () => setTopic(t.id) },
+        h("span", {}, t.label, sev === "high" || sev === "medium" ? h("span", { class: "dot " + sev }) : null), h("span", { class: "n" }, t.changes + t.files)));
+    }
+  }
   rail.append(h("h6", {}, "Review"));
   for (const [id, label] of SECTIONS) {
-    rail.append(h("a", { class: "sec", href: "#" + id, "data-sec": id }, h("span", {}, label),
+    if (counts[id] === 0 && id !== "risks") continue;
+    rail.append(h("a", { class: "sec", href: "#" + id, "data-sec": id, onclick: e => {
+        e.preventDefault(); rememberSpot();
+        const s = document.getElementById(id); if (!s) return;
+        s.classList.remove("collapsed"); secCollapsed[id] = false;
+        s.scrollIntoView({ behavior: "smooth", block: "start" });
+      } }, h("span", {}, label),
       h("span", { class: "n" + (id === "risks" && hot ? " hot" : "") }, counts[id] === "" ? "" : counts[id])));
   }
   rail.append(h("h6", {}, "Reading order"), h("div", { class: "files", id: "railfiles" }));
   renderRailFiles();
 }
+
 function fileSeverity(f) {
   const rs = R.risks.filter(r => r.file === f.path);
   return rs.some(r => r.severity === "high") ? "high" : rs.some(r => r.severity === "medium") ? "medium" : rs.length ? "low" : "none";
@@ -452,14 +567,28 @@ function renderRailFiles() {
   const box = document.getElementById("railfiles");
   if (!box) return;
   box.innerHTML = "";
-  for (const f of R.files) {
+  for (const f of R.files.filter(inTopic)) {
     box.append(h("div", { class: "file" + (reviewed["f:" + f.path] ? " done" : ""), title: f.path + "\n" + f.reasons.join(" · "), onclick: () => jumpFile(f.path) },
       h("span", { class: "rk" }, f.rank), h("span", { class: "nm" }, "‎" + f.path), h("span", { class: "dot " + fileSeverity(f) })));
   }
 }
 
 // ------------------------------------------------------------------ sections
-function secEl(id, title, ...kids) { return h("section", { class: "sec", id }, h("h2", {}, title), ...kids); }
+function secEl(id, title, ...kids) {
+  const sec = h("section", { class: "sec" + (secCollapsed[id] ? " collapsed" : ""), id });
+  const groups = () => [...sec.querySelectorAll(".tgroup")];
+  const setAll = open => groups().forEach(g => { g.classList.toggle("open", open); groupOpen[g.dataset.key] = open; });
+  const h2 = h("h2", { title: "Click to collapse or expand this section" }, h("span", { class: "chev" }, "▶"), title,
+    topicFilter !== "all" && id !== "overview" ? h("span", { class: "fl" }, "· " + topicLabel(topicFilter)) : null);
+  h2.addEventListener("click", e => {
+    if (e.target.closest(".ctl")) return;
+    secCollapsed[id] = sec.classList.toggle("collapsed");
+  });
+  sec.append(h2, ...kids);
+  if (groups().length) h2.append(h("span", { class: "ctl" },
+    h("button", { onclick: () => setAll(true) }, "expand all"), h("button", { onclick: () => setAll(false) }, "collapse all")));
+  return sec;
+}
 
 function renderOverview() {
   const llm = R.llm || {};
@@ -503,7 +632,7 @@ function renderOverview() {
   return secEl("overview", "Overview", ...out);
 }
 
-function renderRisks() {
+function riskItems() {
   const llm = R.llm || {};
   const items = [
     ...(llm.status === "ok" ? (llm.concerns || []).map((c, i) => ({ id: "c:" + i + ":" + c.title, severity: c.severity, title: c.title, detail: c.detail, hunk_ids: c.hunks, file: HUNKS[c.hunks?.[0]]?.file, source: "Claude" })) : []),
@@ -511,14 +640,18 @@ function renderRisks() {
   ];
   const order = { high: 0, medium: 1, low: 2 };
   items.sort((a, b) => order[a.severity] - order[b.severity] || (a.source === "Claude" ? -1 : 1) - (b.source === "Claude" ? -1 : 1));
+  return items;
+}
+function renderRisks() {
+  const items = riskItems().filter(inTopic);
   if (!items.length) return secEl("risks", "Risks", h("div", { class: "empty" }, "Nothing flagged."));
   const counts = { all: items.length, high: 0, medium: 0, low: 0 };
   items.forEach(i => counts[i.severity]++);
-  const list = h("div", { class: "card" });
-  const draw = () => {
-    list.innerHTML = "";
-    for (const it of items) {
-      if (riskFilter !== "all" && it.severity !== riskFilter) continue;
+  if (riskFilter !== "all" && !counts[riskFilter]) riskFilter = "all";
+  const list = h("div");
+  const rows = sub => {
+    const card = h("div", { class: "card" });
+    for (const it of sub) {
       const row = h("div", { class: "row" });
       const body = h("div", { class: "body" },
         h("div", { class: "title" }, it.title),
@@ -528,8 +661,14 @@ function renderRisks() {
       if (t) meta.append(t);
       body.append(meta);
       row.append(check(it.id, row), body, loc(it.file, it.line) || h("span"));
-      list.append(row);
+      card.append(row);
     }
+    return card;
+  };
+  const draw = () => {
+    list.innerHTML = "";
+    const shown = items.filter(it => riskFilter === "all" || it.severity === riskFilter);
+    list.append(...topicGroups("risks", shown, rows, it => it.title.length > 60 ? it.title.slice(0, 58) + "…" : it.title));
   };
   const filters = h("div", { class: "filters" }, ["all", "high", "medium", "low"].filter(s => s === "all" || counts[s]).map(s =>
     h("button", { class: "btn" + (riskFilter === s ? " on" : ""), onclick: e => { riskFilter = s; [...filters.children].forEach(b => b.classList.remove("on")); e.target.classList.add("on"); draw(); } }, `${s} ${counts[s]}`)));
@@ -556,48 +695,55 @@ function wordDiff(a, b) {
 
 function renderLogic() {
   const llm = R.llm || {};
-  const out = [];
-  if (llm.status === "ok" && (llm.business_logic || []).length) {
-    for (const b of llm.business_logic) {
+  const bl = llm.status === "ok" ? (llm.business_logic || []).map(b => ({ _bl: b, topic: topicOf({ file: HUNKS[(b.hunks || [])[0]]?.file }) })) : [];
+  const items = [
+    ...bl,
+    ...R.changes.filter(c => c.kind === "config" && c.status !== "removed"),
+    ...R.changes.filter(c => c.kind === "agent"),
+  ].filter(inTopic);
+  const build = sub => {
+    const out = [];
+    for (const { _bl: b } of sub.filter(x => x._bl)) {
       const c = h("div", { class: "card" });
-      const id = "bl:" + b.title;
       const hd = h("div", { class: "row" });
       const body = h("div", { class: "body" }, h("div", { class: "title" }, b.title));
       const t = codeToggle(c, b.hunks, "show code");
-      hd.append(check(id, hd), body, t || h("span"));
+      hd.append(check("bl:" + b.title, hd), body, t || h("span"));
       c.append(hd, h("div", { class: "ba" }, h("div", {}, h("h5", {}, "Before"), b.before || "—"), h("div", {}, h("h5", {}, "After"), b.after || "—")));
       if (b.why_it_matters) c.append(h("div", { class: "why" }, h("b", {}, "Why it matters  "), b.why_it_matters));
       out.push(c);
     }
-  } else if (llm.status === "running") {
-    out.push(h("div", { class: "card llm-state" }, h("span", { class: "spin" }), "Waiting for the model pass…"));
-  }
-  const consts = R.changes.filter(c => c.kind === "config" && c.status !== "removed");
-  if (consts.length) {
-    const card = h("div", { class: "card" });
-    for (const c of consts) {
-      const row = h("div", { class: "constrow" });
-      const val = c.status === "added"
-        ? h("div", { class: "cval" }, h("span", { class: "now" }, c.after.signature))
-        : h("div", { class: "cval" }, h("span", { class: "was" }, c.before.signature), h("span", { class: "arrow" }, "→"), h("span", { class: "now" }, c.after.signature));
-      const body = h("div", { class: "body" }, h("div", { class: "title mono" }, c.name, " ", h("span", { class: "st " + c.status }, c.status)), val);
-      const t = codeToggle(body, c.hunk_ids);
-      row.append(check(c.id, row), body, h("div", {}, loc(c.file, c.line)));
-      if (t) body.append(h("div", { class: "meta" }, t));
-      card.append(row);
+    const consts = sub.filter(c => c.kind === "config");
+    if (consts.length) {
+      const card = h("div", { class: "card" });
+      for (const c of consts) {
+        const row = h("div", { class: "constrow" });
+        const val = c.status === "added"
+          ? h("div", { class: "cval" }, h("span", { class: "now" }, c.after.signature))
+          : h("div", { class: "cval" }, h("span", { class: "was" }, c.before.signature), h("span", { class: "arrow" }, "→"), h("span", { class: "now" }, c.after.signature));
+        const body = h("div", { class: "body" }, h("div", { class: "title mono" }, c.name, " ", h("span", { class: "st " + c.status }, c.status)), val);
+        const t = codeToggle(body, c.hunk_ids);
+        row.append(check(c.id, row), body, h("div", {}, loc(c.file, c.line)));
+        if (t) body.append(h("div", { class: "meta" }, t));
+        card.append(row);
+      }
+      if (out.length) out.push(h("div", { style: "height:10px" }));
+      out.push(h("div", { class: "src", style: "margin:0 0 6px 2px" }, "Constants"), card);
     }
-    out.push(h("div", { style: "height:10px" }), h("div", { class: "src", style: "margin:0 0 6px 2px" }, "Constants"), card);
-  }
-  const agents = R.changes.filter(c => c.kind === "agent");
-  for (const c of agents) {
-    const card = h("div", { class: "card ent" });
-    card.append(entHeader(c, card));
-    const bt = c.before?.fields?.text, at = c.after?.fields?.text;
-    if (bt != null || at != null) card.append(h("div", { class: "prompt-diff", html: c.status === "modified" ? wordDiff(bt, at) : esc(at ?? bt) }));
-    else card.append(fieldTable(c));
-    out.push(h("div", { style: "height:10px" }), card);
-  }
-  if (!out.length) out.push(h("div", { class: "empty" }, llm.status === "ok" ? "No business-logic changes identified." : "Constants, prompts and (with the model pass) business-rule changes show up here."));
+    for (const c of sub.filter(c => c.kind === "agent")) {
+      const card = h("div", { class: "card ent" });
+      card.append(entHeader(c, card));
+      const bt = c.before?.fields?.text, at = c.after?.fields?.text;
+      if (bt != null || at != null) card.append(h("div", { class: "prompt-diff", html: c.status === "modified" ? wordDiff(bt, at) : esc(at ?? bt) }));
+      else card.append(fieldTable(c));
+      out.push(h("div", { style: "height:10px" }), card);
+    }
+    return out;
+  };
+  const out = [];
+  if (llm.status === "running") out.push(h("div", { class: "card llm-state" }, h("span", { class: "spin" }), "Waiting for the model pass…"), h("div", { style: "height:10px" }));
+  if (items.length) out.push(...topicGroups("logic", items, build, x => x._bl ? x._bl.title : x.name));
+  else out.push(h("div", { class: "empty" }, llm.status === "ok" ? "No business-logic changes identified." : "Constants, prompts and (with the model pass) business-rule changes show up here."));
   return secEl("logic", "Business logic", ...out);
 }
 
@@ -649,44 +795,53 @@ function opClass(op) {
   return "mid";
 }
 
-function renderData() {
-  const items = R.changes.filter(c => ["migration", "table", "model", "type"].includes(c.kind));
-  const order = { migration: 0, table: 1, model: 2, type: 3 };
-  items.sort((a, b) => order[a.kind] - order[b.kind] || a.file.localeCompare(b.file) || a.line - b.line);
-  if (!items.length) return secEl("data", "Data layer", h("div", { class: "empty" }, "No schema, model or migration changes."));
-  const grid = h("div", { class: "grid2" });
-  for (const c of items) {
-    const card = h("div", { class: "card ent" });
-    const hd = entHeader(c, card);
-    card.append(hd);
-    const m = (c.after || c.before || {}).meta || {};
-    if (c.kind === "migration") {
-      if (m.message && m.message !== c.name) hd.querySelector(".nm").after(h("div", { style: "font-size:13px;color:var(--ink-2)" }, m.message));
-      const ul = h("ul", { class: "ops" });
-      for (const op of (m.upgrade || [])) {
-        const tgt = (op.table || "") + (op.column ? "." + op.column : "");
-        ul.append(h("li", {}, h("span", { class: "op " + opClass(op.op) }, op.op), h("span", {}, h("span", { class: "tgt" }, tgt), op.detail ? h("span", { class: "det" }, op.detail) : null)));
-      }
-      if (!(m.upgrade || []).length) ul.append(h("li", {}, h("span", { class: "op mid" }, "—"), h("span", { class: "det" }, "No recognised operations")));
-      card.append(ul);
-      if (m.downgrade_empty && !m.forward_only) card.append(h("div", { class: "warnline" }, "No downgrade — this migration can't be rolled back."));
-    } else {
-      card.append(fieldTable(c));
-      const metaCh = (c.meta_changes || []).filter(x => !["validators"].includes(x.key));
-      for (const mc of metaCh) card.append(h("div", { class: "sig" }, h("span", { style: "color:var(--muted)" }, mc.key + ": "), h("span", { class: "was" }, JSON.stringify(mc.before)), h("span", { class: "now" }, JSON.stringify(mc.after))));
-      if ((c.meta_changes || []).some(x => x.key === "validators")) card.append(h("div", { class: "more" }, "Validators changed"));
+function dataCard(c) {
+  const card = h("div", { class: "card ent" });
+  const hd = entHeader(c, card);
+  card.append(hd);
+  const m = (c.after || c.before || {}).meta || {};
+  if (c.kind === "migration") {
+    if (m.message && m.message !== c.name) hd.querySelector(".nm").after(h("div", { style: "font-size:13px;color:var(--ink-2)" }, m.message));
+    const ul = h("ul", { class: "ops" });
+    for (const op of (m.upgrade || [])) {
+      const tgt = (op.table || "") + (op.column ? "." + op.column : "");
+      ul.append(h("li", {}, h("span", { class: "op " + opClass(op.op) }, op.op), h("span", {}, h("span", { class: "tgt" }, tgt), op.detail ? h("span", { class: "det" }, op.detail) : null)));
     }
-    const t = codeToggle(card, c.hunk_ids);
-    if (t) card.append(h("div", { class: "more" }, t));
-    grid.append(card);
+    if (!(m.upgrade || []).length) ul.append(h("li", {}, h("span", { class: "op mid" }, "—"), h("span", { class: "det" }, "No recognised operations")));
+    card.append(ul);
+    if (m.downgrade_empty && !m.forward_only) card.append(h("div", { class: "warnline" }, "No downgrade — this migration can't be rolled back."));
+  } else {
+    card.append(fieldTable(c));
+    const metaCh = (c.meta_changes || []).filter(x => !["validators"].includes(x.key));
+    for (const mc of metaCh) card.append(h("div", { class: "sig" }, h("span", { style: "color:var(--muted)" }, mc.key + ": "), h("span", { class: "was" }, JSON.stringify(mc.before)), h("span", { class: "now" }, JSON.stringify(mc.after))));
+    if ((c.meta_changes || []).some(x => x.key === "validators")) card.append(h("div", { class: "more" }, "Validators changed"));
   }
-  return secEl("data", "Data layer", grid);
+  const t = codeToggle(card, c.hunk_ids);
+  if (t) card.append(h("div", { class: "more" }, t));
+  return card;
+}
+
+const LAYERS = {
+  database: { title: "Database — tables, enums & migrations", empty: "No table, enum or migration changes.", order: { migration: 0, table: 1, type: 2, model: 3 } },
+  schemas: { title: "Schemas & types — how data moves through the app", empty: "No model, schema or type changes.", order: { model: 0, type: 1 } },
+};
+function renderLayer(id) {
+  const L = LAYERS[id];
+  const items = R.changes.filter(c => c.layer === (id === "database" ? "database" : "schema") && inTopic(c));
+  items.sort((a, b) => (L.order[a.kind] ?? 9) - (L.order[b.kind] ?? 9) || a.file.localeCompare(b.file) || a.line - b.line);
+  if (!items.length) return secEl(id, L.title, h("div", { class: "empty" }, L.empty));
+  return secEl(id, L.title, ...topicGroups(id, items, sub => h("div", { class: "grid2" }, sub.map(dataCard)), c => c.name));
 }
 
 const AUTHY = /auth|user|token|guard|jwt|session|permission|require|admin|role|protect|login|verify|api_?key|scope/i;
 function renderInterfaces() {
+  const all = R.changes.filter(c => ["route", "task", "env", "dependency"].includes(c.kind) && inTopic(c));
+  if (!all.length) return secEl("interfaces", "Endpoints & tasks", h("div", { class: "empty" }, "No endpoint, task, env or dependency changes."));
+  return secEl("interfaces", "Endpoints & tasks", ...topicGroups("interfaces", all, interfacesBody, c => c.name));
+}
+function interfacesBody(pool) {
   const out = [];
-  const routes = R.changes.filter(c => c.kind === "route");
+  const routes = pool.filter(c => c.kind === "route");
   if (routes.length) {
     const card = h("div", { class: "card routes" });
     const ord = { removed: 0, added: 1, modified: 2, moved: 3 };
@@ -717,7 +872,7 @@ function renderInterfaces() {
   }
   const groups = [["task", "Tasks, workflows & queues"], ["env", "Environment variables"], ["dependency", "Dependencies"]];
   for (const [kind, label] of groups) {
-    const items = R.changes.filter(c => c.kind === kind);
+    const items = pool.filter(c => c.kind === kind);
     if (!items.length) continue;
     const card = h("div", { class: "card" });
     for (const c of items) {
@@ -738,18 +893,21 @@ function renderInterfaces() {
     }
     out.push(h("div", { style: "height:14px" }), h("div", { class: "src", style: "margin:0 0 6px 2px" }, label), card);
   }
-  if (!out.length) out.push(h("div", { class: "empty" }, "No endpoint, task, env or dependency changes."));
-  return secEl("interfaces", "Endpoints & tasks", ...out);
+  if (out[0] && out[0].style && out[0].style.height) out.shift();
+  return out;
 }
 
 function functionChanges() {
   return R.changes.filter(c => c.kind === "function" && (c.status !== "modified" || c.signature_changed || c.body_changed));
 }
 function renderFunctions() {
-  const fns = functionChanges();
+  const fns = functionChanges().filter(inTopic);
   if (!fns.length) return secEl("functions", "Functions", h("div", { class: "empty" }, "No function changes."));
   const ord = { removed: 0, moved: 1, modified: 2, added: 3 };
   fns.sort((a, b) => (b.signature_changed - a.signature_changed) || ord[a.status] - ord[b.status] || a.file.localeCompare(b.file) || a.line - b.line);
+  return secEl("functions", "Functions", ...topicGroups("functions", fns, functionRows, c => c.name));
+}
+function functionRows(fns) {
   const card = h("div", { class: "card" });
   for (const c of fns) {
     const row = h("div", { class: "row" });
@@ -776,12 +934,17 @@ function renderFunctions() {
     row.append(check(c.id, row), body, loc(c.file, c.line));
     card.append(row);
   }
-  return secEl("functions", "Functions", card);
+  return card;
 }
 
 function renderFiles() {
+  const files = R.files.filter(inTopic);
+  if (!files.length) return secEl("files", "Files — risk-ranked reading order", h("div", { class: "empty" }, "No files."));
+  return secEl("files", "Files — risk-ranked reading order", ...topicGroups("files", files, fileCards, f => f.path.split("/").pop()));
+}
+function fileCards(files) {
   const out = [];
-  for (const f of R.files) {
+  for (const f of files) {
     const card = h("div", { class: "card fileblock", id: "file-" + f.rank });
     const sev = fileSeverity(f);
     const fh = h("div", { class: "fh" });
@@ -801,7 +964,7 @@ function renderFiles() {
     card.append(fh);
     out.push(card);
   }
-  return secEl("files", "Files — risk-ranked reading order", ...out);
+  return out;
 }
 
 // ------------------------------------------------------------------ boot
@@ -820,7 +983,8 @@ function render() {
   const y = window.scrollY;
   main.innerHTML = "";
   if (R.errors && R.errors.length) main.append(h("div", { class: "card", style: "padding:10px 16px;margin-bottom:16px;color:var(--high);font-size:13px" }, R.errors.join("\n")));
-  main.append(renderOverview(), renderRisks(), renderLogic(), renderData(), renderInterfaces(), renderFunctions(), renderFiles());
+  main.append(renderOverview(), renderRisks(), renderLogic(), renderLayer("database"), renderLayer("schemas"), renderInterfaces(), renderFunctions(), renderFiles());
+  updateBack();
   window.scrollTo(0, y);
   updateProgress();
   observeSections();
@@ -887,7 +1051,9 @@ async function boot() {
 document.addEventListener("keydown", e => {
   if (e.target.tagName === "INPUT" || e.metaKey || e.ctrlKey) return;
   if (e.key === "r" && !STATIC) refresh();
+  if (e.key === "Backspace" && backStack.length) { e.preventDefault(); goBack(); }
 });
+document.getElementById("backbtn").addEventListener("click", goBack);
 boot();
 })();
 </script>

@@ -70,23 +70,24 @@ def render(report: dict[str, Any], max_items: int = 40) -> str:
             L.append(f"- `{c['name']}`: `{(c['before'] or {}).get('signature', '')}` → `{(c['after'] or {}).get('signature', '')}` ({c['file']})")
         L.append("")
 
-    data = [c for c in r["changes"] if c["kind"] in ("migration", "table", "model", "type")]
-    if data:
-        L.append("## Data layer")
-        for c in data[:max_items]:
-            L.append(f"### {STATUS[c['status']]} {c['kind']} `{c['name']}` · {c['framework']} · `{c['file']}:{c['line']}`")
-            if c["kind"] == "migration":
-                meta = (c.get("after") or c.get("before") or {}).get("meta", {})
-                if meta.get("message"):
-                    L.append(f"_{meta['message']}_")
-                for op in meta.get("upgrade", []):
-                    tgt = (op.get("table") or "") + ("." + op["column"] if op.get("column") else "")
-                    L.append(f"- `{op['op']}` {tgt} {op.get('detail', '')[:140]}")
-                if meta.get("downgrade_empty"):
-                    L.append("- ⚠️ no downgrade")
-            else:
-                L += _fields_table(c)
-        L.append("")
+    for layer, heading in (("database", "## Database (tables, migrations)"), ("schema", "## Schemas & types (data in the app)")):
+        data = [c for c in r["changes"] if c.get("layer") == layer]
+        if data:
+            L.append(heading)
+            for c in data[:max_items]:
+                L.append(f"### {STATUS[c['status']]} {c['kind']} `{c['name']}` · {c['framework']} · `{c['file']}:{c['line']}`")
+                if c["kind"] == "migration":
+                    meta = (c.get("after") or c.get("before") or {}).get("meta", {})
+                    if meta.get("message"):
+                        L.append(f"_{meta['message']}_")
+                    for op in meta.get("upgrade", []):
+                        tgt = (op.get("table") or "") + ("." + op["column"] if op.get("column") else "")
+                        L.append(f"- `{op['op']}` {tgt} {op.get('detail', '')[:140]}")
+                    if meta.get("downgrade_empty"):
+                        L.append("- ⚠️ no downgrade")
+                else:
+                    L += _fields_table(c)
+            L.append("")
 
     iface = [c for c in r["changes"] if c["kind"] in ("route", "task", "env", "dependency")]
     if iface:

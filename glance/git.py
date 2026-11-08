@@ -211,7 +211,8 @@ def collect(repo: Path, base: str | None = None, head: str | None = None, includ
     if head_rev is None and include_untracked:
         untracked = git(repo, "ls-files", "--others", "--exclude-standard", "-z").split("\0")
         for p in untracked:
-            if p and not p.startswith(".glance/"):
+            # A trailing "/" is a nested repo or worktree (e.g. .claude/worktrees/x/): not part of this change.
+            if p and not p.startswith(".glance/") and not p.endswith("/"):
                 entries.append(("added", None, p))
 
     files: list[FileChange] = []

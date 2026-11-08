@@ -7,6 +7,7 @@ import time
 from collections import Counter, defaultdict
 from typing import Any
 
+from .topics import assign_topics
 from . import risk
 from .extractors import ExtractError, extract
 from .git import ChangeSet, git, grep_word
@@ -232,6 +233,21 @@ def trim_hunks_for_report(fc: FileChange) -> list[dict[str, Any]]:
     return out
 
 
+DB_FRAMEWORKS = re.compile(r"prisma|drizzle|sqlalchemy|sqlmodel|typeorm|mongoose|alembic|knex|sql", re.I)
+
+
+def data_layer(c: dict[str, Any]) -> str | None:
+    """'database' = how data is stored (tables, DB enums, migrations); 'schema' = how it moves through the
+    app (Pydantic/Zod models, request/response and TS types). Everything else: None."""
+    if c["kind"] in ("migration", "table"):
+        return "database"
+    if c["kind"] in ("model", "type"):
+        if DB_FRAMEWORKS.search(c.get("framework") or "") or c["file"].endswith((".prisma", ".sql")):
+            return "database"
+        return "schema"
+    return None
+
+
 def analyze(cs: ChangeSet, with_callers: bool = True, intent: str | None = None) -> dict[str, Any]:
     t0 = time.time()
     errors: list[str] = []
@@ -341,7 +357,11 @@ def analyze(cs: ChangeSet, with_callers: bool = True, intent: str | None = None)
         "files": files_out,
         "reading_order": order,
         "llm": {"status": "skipped", "reason": "not run"},
+        "topics": [],
         "errors": errors,
         "timing_ms": int((time.time() - t0) * 1000),
     }
+    report["topics"] = assign_topics(report["changes"], report["files"], report["risks"])
+    for c in report["changes"]:
+        c["layer"] = data_layer(c)
     return report

@@ -185,7 +185,7 @@ def test_prompt_contains_hunk_ids(py_report):
 
 def test_markdown_and_html(py_report):
     md = render(py_report)
-    assert "## Data layer" in md and "loans.interest_rate" in md
+    assert "## Database (tables, migrations)" in md and "## Schemas & types" in md and "loans.interest_rate" in md
     html = export_html(py_report)
     assert "window.__GLANCE_REPORT__" in html and "</script>" in html
     embedded = html.split("window.__GLANCE_REPORT__ = ", 1)[1].split(";</script>", 1)[0]
@@ -231,3 +231,51 @@ def test_open_in_editor_endpoint(tmp_path, monkeypatch):
         assert post({"path": "a.py", "line": 1}) == 501          # valid request, no editor CLI
     finally:
         srv.shutdown()
+
+
+def test_topics_and_layers():
+    from glance.analyze import data_layer
+    from glance.topics import assign_topics, words
+
+    assert words("SettleSubscriptionChargesWorkflow") == ["settle", "subscription", "charge"]
+    ch = lambda i, kind, name, file, fw="": {"id": str(i), "kind": kind, "name": name, "file": file, "framework": fw, "field_changes": []}
+    changes = [
+        ch(1, "table", "Subscription", "db/schema.prisma", "prisma"),
+        ch(2, "table", "SubscriptionCharge", "db/schema.prisma", "prisma"),
+        ch(3, "function", "createDueSubscriptionCharges", "jobs/billing.ts"),
+        ch(4, "function", "loanInAccountId", "alpaca/firmAccounts.ts"),
+        ch(5, "function", "addLoanImpl", "controllers/loanController.ts"),
+        ch(6, "function", "payBackLoanImpl", "controllers/loanController.ts"),
+        ch(7, "function", "formatDate", "utils/format.ts"),
+    ]
+    files = [{"path": p} for p in sorted({c["file"] for c in changes})]
+    topics = assign_topics(changes, files, [{"file": "controllers/loanController.ts"}])
+    by = {c["name"]: c["topic"] for c in changes}
+    assert by["Subscription"] == by["createDueSubscriptionCharges"] == "subscription"
+    assert by["loanInAccountId"] == by["addLoanImpl"] == "loan"
+    assert by["formatDate"] == "other"                      # nothing shared: no one-off topics
+    assert [t["id"] for t in topics][-1] == "other"
+
+    assert data_layer({"kind": "table", "file": "x.py", "framework": "sqlalchemy"}) == "database"
+    assert data_layer({"kind": "type", "file": "db/schema.prisma", "framework": "prisma"}) == "database"   # Prisma enum
+    assert data_layer({"kind": "model", "file": "app/schemas.py", "framework": "pydantic"}) == "schema"
+    assert data_layer({"kind": "type", "file": "src/types.ts", "framework": ""}) == "schema"
+    assert data_layer({"kind": "function", "file": "a.py", "framework": ""}) is None
+
+
+def test_untracked_nested_repo_is_skipped(tmp_path):
+    import subprocess
+
+    from glance.git import collect
+
+    run = lambda *a, cwd=tmp_path: subprocess.run(a, cwd=cwd, check=True, capture_output=True)
+    run("git", "init", "-q", "-b", "main")
+    (tmp_path / "a.py").write_text("x = 1\n")
+    run("git", "add", "-A"); run("git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init")
+    nested = tmp_path / "worktrees" / "other"
+    nested.mkdir(parents=True)
+    run("git", "init", "-q", cwd=nested)
+    (nested / "b.py").write_text("y = 2\n")
+    (tmp_path / "new.py").write_text("z = 3\n")
+    paths = [f.path for f in collect(tmp_path, base="main").files]
+    assert "new.py" in paths and not any(p.startswith("worktrees") for p in paths)
