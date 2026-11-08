@@ -279,3 +279,33 @@ def test_untracked_nested_repo_is_skipped(tmp_path):
     (tmp_path / "new.py").write_text("z = 3\n")
     paths = [f.path for f in collect(tmp_path, base="main").files]
     assert "new.py" in paths and not any(p.startswith("worktrees") for p in paths)
+
+
+def test_story_chapters(py_report, ts_report):
+    for rep in (py_report, ts_report):
+        st = rep["story"]
+        assert [c["id"] for c in st["chapters"]] == ["goal", "database", "routes", "schemas", "background", "supporting"]
+        units = {u["id"]: u for u in st["units"]}
+        assert sorted(i for c in st["chapters"] for i in c["unit_ids"]) == sorted(units)   # every unit in one chapter
+        assert not any("test" in u["file"].split("/")[0] or ".test." in u["file"] for u in units.values())
+        for c in st["chapters"]:                                                          # new → changed → removed
+            order = [{"added": 0, "modified": 1, "removed": 2}[units[i]["status"]] for i in c["unit_ids"]]
+            assert order == sorted(order) or c["id"] == "schemas"                         # schemas: route-used first
+    py = {u["chapter"] for u in py_report["story"]["units"]}
+    assert {"database", "routes", "schemas"} <= py
+    ts_bg = [u for u in ts_report["story"]["units"] if u["chapter"] == "background"]
+    assert ts_bg, "DBOS workflows should land in background"
+
+
+def test_story_grounding_drops_unknown_units():
+    from glance.llm import ground_story
+
+    out = ground_story({
+        "goal": "Users pay a monthly fee.",
+        "how_it_works": [{"text": "cited", "units": ["u1", "u99"]}, {"text": "uncited", "units": []}, {"text": "bogus", "units": ["u42"]}],
+        "chapters": {"database": "Stores fees.", "nonsense": "x"},
+        "units": {"u1": {"what": "a table", "why": "holds fees"}, "u42": {"what": "made up"}},
+    }, {"u1", "u2"})
+    assert out["how_it_works"] == [{"text": "cited", "units": ["u1"]}]
+    assert set(out["units"]) == {"u1"} and set(out["chapters"]) == {"database"}
+    assert ground_story("not a dict", {"u1"}) == {}

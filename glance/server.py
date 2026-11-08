@@ -22,6 +22,7 @@ class State:
         self.rebuild = rebuild
         self.lock = threading.Lock()
         self.rebuilding = False
+        self.run_model: Callable[[], bool] | None = None
 
     def get(self) -> dict[str, Any]:
         with self.lock:
@@ -109,6 +110,12 @@ def make_handler(state: State):
             u = urlparse(self.path)
             if u.path == "/api/open":
                 return self._open_in_editor()
+            if u.path == "/api/llm":
+                if not self._same_origin():
+                    return self._send(403, b'{"error":"cross-origin"}')
+                if not state.run_model or not state.run_model():
+                    return self._send(409, b'{"error":"model pass unavailable or already running"}')
+                return self._send(202, b'{"ok":true}')
             if u.path == "/api/refresh" and state.rebuild:
                 if state.rebuilding:
                     return self._send(409, b'{"error":"already refreshing"}')

@@ -7,6 +7,7 @@ import time
 from collections import Counter, defaultdict
 from typing import Any
 
+from .story import build_story
 from .topics import assign_topics
 from . import risk
 from .extractors import ExtractError, extract
@@ -364,4 +365,5 @@ def analyze(cs: ChangeSet, with_callers: bool = True, intent: str | None = None)
     report["topics"] = assign_topics(report["changes"], report["files"], report["risks"])
     for c in report["changes"]:
         c["layer"] = data_layer(c)
+    report["story"] = build_story(report)
     return report

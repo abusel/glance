@@ -111,6 +111,39 @@ section.sec > h2::after { order: 2; }
 .backbtn.on { display: inline-flex; }
 .backbtn:hover { border-color: var(--accent); color: var(--accent); }
 
+/* ---------- story ---------- */
+.goal { padding: 20px 22px; }
+.goal .lead { font-size: 18px; line-height: 1.55; letter-spacing: -.01em; color: var(--ink); max-width: 90ch; }
+.goal .lead.muted { color: var(--ink-2); font-size: 15.5px; }
+.goal .aibar { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+.btn.ai { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.flow { margin: 16px 0 0; padding: 0; list-style: none; counter-reset: f; }
+.flow li { counter-increment: f; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 6px; padding: 7px 0; border-top: 1px solid var(--line-2); font-size: 14px; color: var(--ink-2); }
+.flow li::before { content: counter(f); color: var(--accent); font-weight: 700; font-variant-numeric: tabular-nums; }
+.chip { display: inline-block; font-family: var(--mono); font-size: 11.5px; padding: 0 6px; margin: 2px 4px 0 0; border-radius: 5px; background: var(--panel-2); border: 1px solid var(--line); color: var(--ink-2); cursor: pointer; }
+.chip:hover { border-color: var(--accent); color: var(--accent); }
+.chap { margin-top: 14px; }
+.chap-hd { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 10px; align-items: baseline; padding: 14px 18px 10px; }
+.chap-hd .num { width: 24px; height: 24px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 12.5px; display: grid; place-content: center; }
+.chap-hd h3 { margin: 0; font-size: 15.5px; letter-spacing: -.01em; }
+.chap-hd .intro { color: var(--ink-2); font-size: 13.5px; margin-top: 2px; }
+.chap-hd .cnts { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.chap .st-h { padding: 8px 18px 4px; font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; font-weight: 700; border-top: 1px solid var(--line-2); }
+.chap .st-h.added { color: var(--add-ink); } .chap .st-h.modified { color: var(--med); } .chap .st-h.removed { color: var(--del-ink); }
+.urow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 9px 18px 10px; border-top: 1px solid var(--line-2); align-items: start; scroll-margin-top: 90px; }
+.st-h + .urow { border-top: 0; }
+.urow .nm { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+.urow .what { font-size: 14px; color: var(--ink); margin-top: 3px; }
+.urow .why { font-size: 13px; color: var(--muted); margin-top: 1px; }
+.urow .det { font-family: var(--mono); font-size: 11.5px; color: var(--muted); margin-top: 3px; word-break: break-word; }
+.urow .meta { display: flex; gap: 10px; align-items: center; margin-top: 5px; flex-wrap: wrap; }
+.urow > .diff, .urow > .ftable { grid-column: 1 / -1; margin: 8px -18px -10px; border-top: 1px solid var(--line-2); }
+.urow.flash { animation: flash 1.6s ease-out; }
+@keyframes flash { from { background: var(--accent-soft); } to { background: transparent; } }
+.tag-route { font-size: 10.5px; padding: 0 6px; border-radius: 4px; color: var(--get); border: 1px solid color-mix(in srgb, var(--get) 40%, transparent); }
+.chap .tg-body { padding-left: 0; border-left: 0; margin: 0; }
+.chap .tgroup { padding: 6px 12px; } .chap .tgroup + .tgroup { margin-top: 0; }
+
 /* ---------- overview ---------- */
 .hero { padding: 18px 20px; }
 .hero .headline { font-size: 13px; color: var(--muted); margin-bottom: 8px; font-variant-numeric: tabular-nums; }
@@ -460,7 +493,7 @@ function codeToggle(container, hunkIds, label = "show code", opts = {}) {
   let open = null;
   const b = h("button", { class: "toggle" }, label);
   b.addEventListener("click", () => {
-    const host = container.closest(".row, .constrow, .routes .r, .walk .step") || container;   // span the whole row, not the middle column
+    const host = container.closest(".row, .constrow, .urow, .routes .r, .walk .step") || container;   // span the whole row, not the middle column
     const card = container.closest(".grid2 > .card");       // two-up cards go full width while code is open
     if (open) { open.remove(); open = null; b.textContent = label; if (card && !card.querySelector(".diff")) card.classList.remove("wide"); return; }
     open = diffTable(hunkIds, opts);
@@ -510,7 +543,7 @@ function renderTop() {
 }
 
 const SECTIONS = [
-  ["overview", "Overview"], ["risks", "Risks"], ["logic", "Business logic"], ["database", "Database"], ["schemas", "Schemas & types"],
+  ["overview", "Overview"], ["story", "Story"], ["risks", "Risks"], ["logic", "Business logic"], ["database", "Database"], ["schemas", "Schemas & types"],
   ["interfaces", "Endpoints & tasks"], ["functions", "Functions"], ["files", "Files"],
 ];
 function sectionCounts() {
@@ -520,6 +553,7 @@ function sectionCounts() {
   const blTopic = b => topicOf({ file: HUNKS[(b.hunks || [])[0]]?.file });
   return {
     overview: "",
+    story: ((R.story || {}).units || []).filter(inTopic).length,
     risks: riskItems().filter(inTopic).length,
     logic: (llm.business_logic || []).filter(b => topicFilter === "all" || blTopic(b) === topicFilter).length + ch.filter(c => ["config", "agent"].includes(c.kind) && c.status !== "removed").length,
     database: ch.filter(c => c.layer === "database").length,
@@ -968,6 +1002,106 @@ function fileCards(files) {
   return out;
 }
 
+// ------------------------------------------------------------------ story
+const STATUS_WORD = { added: "New", modified: "Changed", removed: "Removed" };
+function jumpUnit(id) {
+  const el = document.getElementById("unit-" + id);
+  if (!el) return;
+  rememberSpot(); reveal(el);
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+}
+async function startModelPass() {
+  try {
+    const r = await fetch("/api/llm", { method: "POST" });
+    if (!r.ok) { toast("Couldn't start the AI summary (is the `claude` CLI installed?)"); return; }
+    toast("Claude is reading the change — a few minutes");
+    R.llm = { status: "running" }; render(); poll();
+  } catch { toast("Couldn't reach the glance server"); }
+}
+function unitRow(u, ai) {
+  const row = h("div", { class: "urow", id: "unit-" + u.id });
+  const c0 = R.changes.find(c => c.id === u.change_ids[0]);
+  const body = h("div", {},
+    h("div", {}, h("span", { class: "nm" }, u.name), " ", h("span", { class: "st " + u.status }, STATUS_WORD[u.status] || u.status), " ",
+      h("span", { class: "fw" }, u.kind === "function" && u.chapter === "background" && u.detail.includes("steps") ? "workflow" : u.kind),
+      u.used_by_routes ? h("span", { class: "tag-route", title: "Referenced by changed route/controller code" }, " used by routes") : null),
+    ai && ai.what ? h("div", { class: "what" }, ai.what) : null,
+    ai && ai.why ? h("div", { class: "why" }, ai.why) : null,
+    u.detail ? h("div", { class: "det" }, u.detail) : null);
+  const meta = h("div", { class: "meta" });
+  if (c0 && (c0.field_changes || []).length && ["table", "model", "type"].includes(c0.kind)) {
+    let open = null;
+    const b = h("button", { class: "toggle" }, "fields");
+    b.addEventListener("click", () => {
+      if (open) { open.remove(); open = null; b.textContent = "fields"; return; }
+      open = h("div", { class: "ftable" }, fieldTable(c0, 40)); row.append(open); b.textContent = "hide fields";
+    });
+    meta.append(b);
+  }
+  const t = codeToggle(body, u.hunk_ids);
+  if (t) meta.append(t);
+  if (meta.childNodes.length) body.append(meta);
+  row.append(body, loc(u.file, u.line) || h("span"));
+  return row;
+}
+function renderStory() {
+  const st = R.story;
+  if (!st || !(st.units || []).length) return secEl("story", "The change, step by step", h("div", { class: "empty" }, "Nothing to narrate."));
+  const llm = R.llm || {};
+  const ai = (llm.status === "ok" && llm.story) || {};
+  const aiUnits = ai.units || {};
+  const units = Object.fromEntries(st.units.map(u => [u.id, u]));
+  const out = [];
+
+  // 1. goal
+  const goal = h("div", { class: "card goal" });
+  goal.append(h("div", { class: "chap-hd", style: "padding:0 0 10px" }, h("span", { class: "num" }, 1), h("div", {}, h("h3", {}, "What this accomplishes")), h("span")));
+  if (ai.goal) goal.append(h("div", { class: "lead" }, ai.goal));
+  else goal.append(h("div", { class: "lead muted" }, (R.commits && R.commits.length ? R.commits[0].split("\n")[0] : R.summary.headline)));
+  if ((ai.how_it_works || []).length) {
+    goal.append(h("div", { class: "src", style: "margin-top:16px" }, "How it works"),
+      h("ol", { class: "flow" }, ai.how_it_works.map(step => h("li", {}, h("div", {}, step.text, h("div", {},
+        step.units.filter(id => units[id]).map(id => h("span", { class: "chip", title: "Jump to " + units[id].name, onclick: () => jumpUnit(id) }, units[id].name))))))));
+  }
+  const bar = h("div", { class: "aibar" });
+  if (llm.status === "running") bar.append(h("span", { class: "spin" }), "Claude is reading the change and writing the walkthrough (usually 2–5 minutes). Everything below is already accurate; explanations fill in when it lands.");
+  else if (llm.status !== "ok") {
+    if (!STATIC) bar.append(h("button", { class: "btn ai", onclick: startModelPass }, "✨ Generate AI summary"));
+    bar.append(llm.status === "error" ? "Last attempt failed: " + (llm.error || "unknown error") : "Adds a plain-English goal, how-it-works steps and a what/why for every item below.");
+  }
+  if (bar.childNodes.length) goal.append(bar);
+  out.push(goal);
+
+  // 2-6. chapters
+  let n = 1;
+  for (const ch of st.chapters) {
+    if (ch.id === "goal") continue;
+    const us = ch.unit_ids.map(id => units[id]).filter(u => u && inTopic(u));
+    if (!us.length) continue;
+    n++;
+    const counts = ["added", "modified", "removed"].map(s => [s, us.filter(u => u.status === s).length]).filter(([, k]) => k);
+    const card = h("div", { class: "card chap", id: "chap-" + ch.id });
+    card.append(h("div", { class: "chap-hd" }, h("span", { class: "num" }, n),
+      h("div", {}, h("h3", {}, ch.title), h("div", { class: "intro" }, (ai.chapters || {})[ch.id] || ch.blurb)),
+      h("span", { class: "cnts" }, counts.map(([s, k]) => `${k} ${STATUS_WORD[s].toLowerCase()}`).join(" · "))));
+    const list = sub => {
+      const kids = [];
+      for (const s of ["added", "modified", "removed"]) {
+        const g = sub.filter(u => u.status === s);
+        if (!g.length) continue;
+        kids.push(h("div", { class: "st-h " + s }, `${STATUS_WORD[s]} · ${g.length}`), ...g.map(u => unitRow(u, aiUnits[u.id])));
+      }
+      return kids;
+    };
+    if (ch.id === "supporting" && us.length > 8) card.append(...topicGroups("story-supporting", us, list, u => u.name));
+    else card.append(...list(us));
+    out.push(card);
+  }
+  if ((st.test_files || []).length) out.push(h("div", { class: "more", style: "border:0;padding:10px 4px" }, `Plus ${plural(st.test_files.length, "test file")} — see Files.`));
+  return secEl("story", "The change, step by step", ...out);
+}
+
 // ------------------------------------------------------------------ boot
 function indexReport() {
   HUNKS = {}; FILES = {};
@@ -984,7 +1118,7 @@ function render() {
   const y = window.scrollY;
   main.innerHTML = "";
   if (R.errors && R.errors.length) main.append(h("div", { class: "card", style: "padding:10px 16px;margin-bottom:16px;color:var(--high);font-size:13px" }, R.errors.join("\n")));
-  main.append(renderOverview(), renderRisks(), renderLogic(), renderLayer("database"), renderLayer("schemas"), renderInterfaces(), renderFunctions(), renderFiles());
+  main.append(renderOverview(), renderStory(), renderRisks(), renderLogic(), renderLayer("database"), renderLayer("schemas"), renderInterfaces(), renderFunctions(), renderFiles());
   updateBack();
   window.scrollTo(0, y);
   updateProgress();

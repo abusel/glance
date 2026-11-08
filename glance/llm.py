@@ -37,13 +37,29 @@ Rules:
   what was done that wasn't asked (scope creep), and what was asked but is missing.
 - Be terse. Plain English. No markdown inside strings.
 
+The "story" explains the change the way a teammate would walk someone through a feature: first the goal, then
+the records we store, then the routes that touch them, then the schemas those routes use, then the background
+work. Static analysis already sorted the change into "Story units" (listed below, ids like "u3"); you write
+the words. For "story":
+- goal: 2-4 sentences a product manager would understand. The user-facing or business outcome, not the code.
+- how_it_works: 3-7 steps tracing the flow end to end, in the order it happens (e.g. "When a user signs up,
+  they're enrolled in the Base plan (UserSubscription row)"). Each step cites the unit ids it involves.
+- chapters: one sentence per chapter id (database, routes, schemas, background, supporting) saying what that
+  part contributes to the goal. Omit chapters with no units.
+- units: for EVERY unit id in the database, routes, schemas and background chapters (and the supporting ones
+  that matter), {"what": what it is or does, one plain sentence; "why": why this change needs it, one sentence}.
+  For a removed unit, say what it did and what replaces it (or that nothing does). Only use listed unit ids.
+
 Return ONLY a JSON object, no prose, matching:
 {
   "summary": "2-4 sentences: what this change does and why it matters",
   "intent": {"asked": "...", "done": ["..."], "extra": [{"text": "...", "hunks": ["h_..."]}], "missing": ["..."]} | null,
   "business_logic": [{"title": "...", "before": "...", "after": "...", "why_it_matters": "...", "hunks": ["h_..."]}],
   "concerns": [{"severity": "high|medium|low", "title": "...", "detail": "...", "hunks": ["h_..."]}],
-  "walkthrough": [{"step": "short sentence on what to read and why", "hunks": ["h_..."]}]
+  "walkthrough": [{"step": "short sentence on what to read and why", "hunks": ["h_..."]}],
+  "story": {"goal": "...", "how_it_works": [{"text": "...", "units": ["u1", "u4"]}],
+            "chapters": {"database": "...", "routes": "...", "schemas": "...", "background": "...", "supporting": "..."},
+            "units": {"u1": {"what": "...", "why": "..."}}}
 }
 walkthrough = the 3-8 hunks to read, in order, to understand the change."""
 
@@ -92,6 +108,21 @@ def build_prompt(report: dict) -> str:
     parts += ["## Static summary", report["summary"]["headline"], *("- " + b for b in report["summary"]["bullets"]), ""]
     changes = [c for c in report["changes"] if not (c["kind"] == "function" and c["status"] == "modified" and not c.get("body_changed") and not c.get("signature_changed"))]
     parts += ["## Structural changes", *(_compact_change(c) for c in changes[:250]), ""]
+    story = report.get("story") or {}
+    if story.get("units"):
+        by_id = {u["id"]: u for u in story["units"]}
+        parts.append("## Story units (write story.units for these ids)")
+        for ch in story["chapters"]:
+            if not ch["unit_ids"]:
+                continue
+            parts.append(f"### {ch['id']} — {ch['title']}")
+            for uid in ch["unit_ids"][:120]:
+                u = by_id[uid]
+                extra = " (used by a changed route)" if u.get("used_by_routes") else ""
+                parts.append(f"{uid} [{u['status']} {u['kind']}] {u['name']} — {u['detail'][:160]}{extra} ({u['file']}:{u['line']}) hunks: {','.join(u['hunk_ids'][:6])}")
+        if story.get("test_files"):
+            parts.append(f"(plus {len(story['test_files'])} test files, not listed)")
+        parts.append("")
     if report["risks"]:
         parts += ["## Static risk flags", *(f"- [{r['severity']}] {r['title']} ({r['file']}:{r['line']})" for r in report["risks"][:60]), ""]
     parts += ["## Diff (hunk ids in brackets; files in suggested reading order)"]
@@ -154,7 +185,7 @@ def _call_anthropic(prompt: str, model: str, timeout: int) -> str:
     return "".join(getattr(b, "text", "") for b in msg.content)
 
 
-def ground(result: dict, valid: set[str]) -> tuple[dict, int]:
+def ground(result: dict, valid: set[str], units: set[str] | None = None) -> tuple[dict, int]:
     dropped = 0
 
     def keep(items: list | None) -> list:
@@ -186,7 +217,27 @@ def ground(result: dict, valid: set[str]) -> tuple[dict, int]:
     for c in result["concerns"]:
         if c.get("severity") not in ("high", "medium", "low"):
             c["severity"] = "medium"
+    result["story"] = ground_story(result.get("story"), units or set())
     return result, dropped
+
+
+def ground_story(story: Any, units: set[str]) -> dict:
+    """Keep only prose tied to real story units: unknown unit ids and uncited flow steps are dropped."""
+    if not isinstance(story, dict):
+        return {}
+    out: dict[str, Any] = {"goal": str(story.get("goal") or "").strip()}
+    steps = []
+    for st in story.get("how_it_works") or []:
+        if isinstance(st, dict) and st.get("text"):
+            ids = [u for u in st.get("units") or [] if u in units]
+            if ids:
+                steps.append({"text": str(st["text"]), "units": ids})
+    out["how_it_works"] = steps
+    chapters = story.get("chapters") if isinstance(story.get("chapters"), dict) else {}
+    out["chapters"] = {k: str(v) for k, v in chapters.items() if k in ("database", "routes", "schemas", "background", "supporting") and v}
+    us = story.get("units") if isinstance(story.get("units"), dict) else {}
+    out["units"] = {k: {"what": str(v.get("what") or ""), "why": str(v.get("why") or "")} for k, v in us.items() if k in units and isinstance(v, dict)}
+    return out
 
 
 def run(report: dict, provider: str = "auto", model: str | None = None, timeout: int = 420) -> dict[str, Any]:
@@ -206,6 +257,6 @@ def run(report: dict, provider: str = "auto", model: str | None = None, timeout:
         return {"status": "error", "provider": prov, "error": f"timed out after {timeout}s"}
     except Exception as e:
         return {"status": "error", "provider": prov, "error": str(e)[:500]}
-    data, dropped = ground(data, valid)
+    data, dropped = ground(data, valid, {u["id"] for u in (report.get("story") or {}).get("units", [])})
     return {"status": "ok", "provider": prov, "model": model or ("default" if prov == "claude-cli" else DEFAULT_MODEL),
             "prompt_chars": len(prompt), "dropped_ungrounded": dropped, **data}

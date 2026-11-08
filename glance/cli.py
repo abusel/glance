@@ -134,6 +134,23 @@ def cmd_review(args) -> int:
             model_pass(rep)
 
     state.rebuild = rebuild
+
+    # The UI's "Generate AI summary" button: works even when started with --llm none.
+    ui_provider = args.llm if args.llm != "none" else "auto"
+
+    def run_model_now() -> bool:
+        nonlocal run_llm
+        if llm.available_provider(ui_provider) is None or (state.get().get("llm") or {}).get("status") == "running":
+            return False
+        args.llm = ui_provider
+        run_llm = True          # later refreshes keep the model pass on
+        rep = dict(state.get())
+        rep["llm"] = {"status": "running", "provider": llm.available_provider(ui_provider)}
+        state.set(rep)          # mark running before the thread starts, so a second click gets 409
+        threading.Thread(target=model_pass, args=(rep,), daemon=True).start()
+        return True
+
+    state.run_model = run_model_now
     _write(repo, report)
     if run_llm:
         report["llm"] = {"status": "running", "provider": llm.available_provider(args.llm)}
