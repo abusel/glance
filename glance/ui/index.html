@@ -1,0 +1,863 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>glance</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Ccircle cx=%228%22 cy=%228%22 r=%226%22 fill=%22%230e6b61%22/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #f6f5f1; --panel: #ffffff; --panel-2: #fbfaf7; --ink: #1d1c19; --ink-2: #3a3833; --muted: #706c63; --faint: #a19d93;
+  --line: #e5e2d9; --line-2: #efede6; --accent: #0e6b61; --accent-soft: #e2f1ee;
+  --add-bg: #e7f5ea; --add-ink: #18753a; --add-gutter: #cdebd5; --del-bg: #fcebea; --del-ink: #b3261e; --del-gutter: #f6d2cf;
+  --high: #c9302c; --high-soft: #fbe9e8; --med: #b26b00; --med-soft: #fbf1df; --low: #87837a; --low-soft: #efede7;
+  --get: #2563c9; --post: #18753a; --put: #a05a00; --delete: #b3261e; --other: #6b5bb8;
+  --shadow: 0 1px 0 rgba(29,28,25,.04), 0 1px 3px rgba(29,28,25,.06);
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: ui-sans-serif, -apple-system, "Segoe UI", system-ui, "Helvetica Neue", Arial, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #131312; --panel: #1b1b19; --panel-2: #181816; --ink: #ecebe5; --ink-2: #d2d0c8; --muted: #9c988e; --faint: #6e6b63;
+    --line: #2d2c28; --line-2: #24231f; --accent: #4cc7b6; --accent-soft: #15302c;
+    --add-bg: rgba(46,160,67,.14); --add-ink: #6fd08b; --add-gutter: rgba(46,160,67,.22); --del-bg: rgba(248,81,73,.13); --del-ink: #ff8a80; --del-gutter: rgba(248,81,73,.22);
+    --high: #ff6b63; --high-soft: rgba(255,107,99,.12); --med: #f0b54a; --med-soft: rgba(240,181,74,.12); --low: #9c988e; --low-soft: rgba(156,152,142,.12);
+    --get: #6aa4ff; --post: #6fd08b; --put: #f0b54a; --delete: #ff8a80; --other: #b3a5ff;
+    --shadow: 0 1px 0 rgba(0,0,0,.3);
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+a { color: inherit; }
+code, .mono { font-family: var(--mono); font-size: 12.5px; }
+code { background: var(--line-2); padding: 1px 5px; border-radius: 4px; }
+button { font: inherit; color: inherit; }
+
+/* ---------- top bar ---------- */
+.top { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line); }
+.top-in { display: flex; align-items: center; gap: 14px; padding: 10px 20px; max-width: 1480px; margin: 0 auto; flex-wrap: wrap; }
+.brand { font-weight: 700; letter-spacing: -.02em; font-size: 16px; display: flex; align-items: center; gap: 7px; }
+.brand i { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); display: inline-block; box-shadow: 0 0 0 3px var(--accent-soft); }
+.ref { font-family: var(--mono); font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46ch; }
+.ref b { color: var(--ink); font-weight: 600; }
+.spacer { flex: 1; }
+.pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); background: var(--panel); white-space: nowrap; }
+.pill.h { color: var(--high); background: var(--high-soft); border-color: transparent; font-weight: 600; }
+.pill.m { color: var(--med); background: var(--med-soft); border-color: transparent; font-weight: 600; }
+.pill.l { color: var(--low); background: var(--low-soft); border-color: transparent; }
+.add { color: var(--add-ink); } .del { color: var(--del-ink); }
+.btn { border: 1px solid var(--line); background: var(--panel); border-radius: 7px; padding: 4px 10px; cursor: pointer; font-size: 12.5px; }
+.btn:hover { border-color: var(--faint); }
+.btn:disabled { opacity: .5; cursor: default; }
+.progress { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.bar { width: 90px; height: 6px; border-radius: 6px; background: var(--line); overflow: hidden; }
+.bar > span { display: block; height: 100%; background: var(--accent); width: 0; transition: width .25s; }
+
+/* ---------- layout ---------- */
+.wrap { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 28px; max-width: 1480px; margin: 0 auto; padding: 22px 20px 120px; }
+nav.rail { position: sticky; top: 66px; align-self: start; max-height: calc(100vh - 80px); overflow: auto; font-size: 13px; }
+.rail h6 { margin: 18px 0 6px; font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
+.rail a.sec { display: flex; justify-content: space-between; align-items: center; padding: 5px 9px; border-radius: 6px; text-decoration: none; color: var(--ink-2); }
+.rail a.sec:hover, .rail a.sec.on { background: var(--panel); box-shadow: var(--shadow); color: var(--ink); }
+.rail a.sec span.n { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.rail a.sec span.n.hot { color: var(--high); font-weight: 600; }
+.rail .file { display: grid; grid-template-columns: 18px 1fr auto; gap: 6px; padding: 4px 9px; border-radius: 6px; cursor: pointer; align-items: center; }
+.rail .file:hover { background: var(--panel); }
+.rail .file .rk { font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; text-align: right; }
+.rail .file .nm { font-family: var(--mono); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+.rail .file.done .nm { color: var(--faint); text-decoration: line-through; }
+.dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; }
+.dot.high { background: var(--high); } .dot.medium { background: var(--med); } .dot.low { background: var(--low); } .dot.none { background: var(--line); }
+
+main { min-width: 0; }
+section.sec { margin: 0 0 40px; scroll-margin-top: 76px; }
+section.sec > h2 { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); font-weight: 650; margin: 0 0 12px;
+  display: flex; align-items: center; gap: 10px; }
+section.sec > h2::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); }
+.card + .card { margin-top: 10px; }
+.grid2 > .card { margin-top: 0; }
+.empty { color: var(--faint); font-size: 13px; padding: 4px 2px; }
+
+/* ---------- overview ---------- */
+.hero { padding: 18px 20px; }
+.hero .headline { font-size: 13px; color: var(--muted); margin-bottom: 8px; font-variant-numeric: tabular-nums; }
+.hero .summary { font-size: 16.5px; line-height: 1.55; letter-spacing: -.005em; color: var(--ink); max-width: 80ch; }
+.hero ul.glance { margin: 14px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px; }
+.hero ul.glance li { font-size: 12.5px; padding: 3px 9px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--line-2); color: var(--ink-2); }
+.llm-state { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; padding: 10px 20px; border-top: 1px solid var(--line-2); }
+.spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.intent { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; }
+.intent > div { padding: 14px 18px; border-left: 1px solid var(--line-2); }
+.intent > div:first-child { border-left: 0; }
+.intent h4 { margin: 0 0 8px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; font-weight: 650; }
+.intent ul { margin: 0; padding: 0 0 0 16px; font-size: 13px; }
+.intent li { margin: 3px 0; }
+.intent .done h4 { color: var(--add-ink); } .intent .extra h4 { color: var(--med); } .intent .missing h4 { color: var(--high); }
+.asked { padding: 12px 18px; border-bottom: 1px solid var(--line-2); font-size: 13.5px; color: var(--ink-2); }
+.asked b { font-weight: 600; color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; margin-right: 8px; }
+.walk { counter-reset: w; padding: 6px 0; }
+.walk .step { display: grid; grid-template-columns: 34px 1fr; padding: 8px 18px 8px 10px; }
+.walk .step::before { counter-increment: w; content: counter(w); font-weight: 650; color: var(--accent); text-align: center; font-variant-numeric: tabular-nums; }
+
+/* ---------- rows ---------- */
+.row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; padding: 11px 16px; border-top: 1px solid var(--line-2); align-items: start; }
+.row:first-child { border-top: 0; }
+.row.done > .body, .constrow.done > .body { opacity: .5; }
+.card.ent.done > :not(.hd), .card.ent.done .hd > div { opacity: .5; }
+.fileblock.done .fh > div, .fileblock.done .fh .stats { opacity: .5; }
+.routes .r.done > .body { opacity: .5; }
+.row .title { font-weight: 560; color: var(--ink); }
+.row .detail { color: var(--ink-2); font-size: 13px; margin-top: 2px; white-space: pre-line; }
+.loc { font-family: var(--mono); font-size: 11.5px; color: var(--muted); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 38ch; direction: rtl; text-align: right; }
+.loc:hover { color: var(--accent); text-decoration: underline; }
+.row .meta { display: flex; gap: 8px; align-items: center; margin-top: 5px; flex-wrap: wrap; }
+.chk { appearance: none; width: 16px; height: 16px; border: 1.5px solid var(--faint); border-radius: 4px; margin: 2px 0 0; cursor: pointer; display: grid; place-content: center; background: var(--panel); }
+.chk:checked { background: var(--accent); border-color: var(--accent); }
+.chk:checked::after { content: ""; width: 8px; height: 4px; border: 2px solid #fff; border-top: 0; border-right: 0; transform: rotate(-45deg) translate(1px, -1px); }
+.toggle { font-size: 12px; color: var(--accent); cursor: pointer; background: none; border: 0; padding: 0; }
+.toggle:hover { text-decoration: underline; }
+.sev { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; }
+.sev.high { color: var(--high); background: var(--high-soft); } .sev.medium { color: var(--med); background: var(--med-soft); } .sev.low { color: var(--low); background: var(--low-soft); }
+.src { font-size: 10.5px; color: var(--faint); letter-spacing: .04em; text-transform: uppercase; }
+.filters { display: flex; gap: 6px; margin: -4px 0 10px; flex-wrap: wrap; }
+.filters .btn.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+/* ---------- entity cards ---------- */
+.grid2 { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(520px, 100%), 1fr)); gap: 12px; }
+.ent { overflow: hidden; }
+.ent .hd { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; padding: 12px 14px 10px; align-items: start; }
+.ent .nm { font-family: var(--mono); font-size: 13.5px; font-weight: 600; word-break: break-word; }
+.ent .sub { font-size: 12px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 2px; }
+.st { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; }
+.st.added { color: var(--add-ink); background: var(--add-bg); } .st.removed { color: var(--del-ink); background: var(--del-bg); }
+.st.modified { color: var(--med); background: var(--med-soft); } .st.moved { color: var(--other); background: color-mix(in srgb, var(--other) 14%, transparent); }
+.fw { font-size: 11px; padding: 0 6px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); }
+table.f { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+table.f td { padding: 4px 10px; border-top: 1px solid var(--line-2); vertical-align: top; word-break: break-word; }
+table.f td.k { width: 1%; white-space: nowrap; font-weight: 600; }
+table.f td.m { width: 18px; text-align: center; font-weight: 700; padding-right: 0; }
+table.f tr.added td { background: var(--add-bg); } table.f tr.added td.m { color: var(--add-ink); }
+table.f tr.removed td { background: var(--del-bg); } table.f tr.removed td.m, table.f tr.removed td.k { color: var(--del-ink); }
+table.f tr.removed td.k { text-decoration: line-through; }
+table.f tr.changed td.m, table.f tr.renamed td.m { color: var(--med); }
+table.f .was { color: var(--del-ink); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--del-ink) 50%, transparent); display: block; }
+table.f .now { color: var(--add-ink); display: block; }
+table.f tr.same td { color: var(--muted); }
+.more { font-size: 12px; color: var(--muted); padding: 6px 14px; border-top: 1px solid var(--line-2); }
+.ops { list-style: none; margin: 0; padding: 0; font-family: var(--mono); font-size: 12px; }
+.ops li { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px; padding: 5px 14px; border-top: 1px solid var(--line-2); }
+.ops .op { font-weight: 700; }
+.ops .op.bad { color: var(--del-ink); } .ops .op.good { color: var(--add-ink); } .ops .op.mid { color: var(--med); }
+.ops .tgt { color: var(--ink); } .ops .det { color: var(--muted); display: block; word-break: break-word; }
+.warnline { padding: 7px 14px; font-size: 12.5px; color: var(--high); background: var(--high-soft); border-top: 1px solid var(--line-2); }
+.sig { font-family: var(--mono); font-size: 12px; padding: 8px 14px; border-top: 1px solid var(--line-2); word-break: break-word; }
+.sig .was { color: var(--del-ink); text-decoration: line-through; display: block; }
+.sig .now { color: var(--add-ink); display: block; }
+
+/* ---------- routes ---------- */
+.routes .r { display: grid; grid-template-columns: 22px 64px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 16px; border-top: 1px solid var(--line-2); }
+.routes .r:first-child { border-top: 0; }
+.meth { font-family: var(--mono); font-size: 11px; font-weight: 700; padding: 2px 0; border-radius: 4px; text-align: center; color: #fff; }
+.meth.GET { background: var(--get); } .meth.POST { background: var(--post); } .meth.PUT, .meth.PATCH { background: var(--put); }
+.meth.DELETE { background: var(--delete); } .meth.other { background: var(--other); }
+@media (prefers-color-scheme: dark) { .meth { color: #131312; } }
+.routes .p { font-family: var(--mono); font-size: 13px; word-break: break-all; }
+.routes .p.removed { text-decoration: line-through; color: var(--del-ink); }
+.routes .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 3px; font-size: 11.5px; color: var(--muted); }
+.lock { color: var(--add-ink); } .nolock { color: var(--high); font-weight: 600; }
+
+/* ---------- logic ---------- */
+.ba { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border-top: 1px solid var(--line-2); }
+.ba > div { padding: 10px 16px; font-size: 13px; }
+.ba > div + div { border-left: 1px solid var(--line-2); }
+.ba h5 { margin: 0 0 3px; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); font-weight: 650; }
+.why { padding: 9px 16px; font-size: 13px; color: var(--ink-2); border-top: 1px solid var(--line-2); background: var(--panel-2); }
+.why b { color: var(--accent); font-weight: 600; }
+.constrow { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--line-2); align-items: start; }
+.constrow:first-child { border-top: 0; }
+.cval { font-family: var(--mono); font-size: 12.5px; }
+.cval .was { color: var(--del-ink); text-decoration: line-through; }
+.cval .arrow { color: var(--faint); margin: 0 6px; }
+.cval .now { color: var(--add-ink); font-weight: 600; }
+.prompt-diff { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; padding: 10px 16px; border-top: 1px solid var(--line-2); line-height: 1.6; max-height: 340px; overflow: auto; }
+.prompt-diff ins { background: var(--add-bg); color: var(--add-ink); text-decoration: none; }
+.prompt-diff del { background: var(--del-bg); color: var(--del-ink); }
+
+/* ---------- diff ---------- */
+.diff { border-top: 1px solid var(--line-2); overflow-x: auto; background: var(--panel); }
+.diff table { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 12px; line-height: 1.55; }
+.diff td { padding: 0 10px; white-space: pre; vertical-align: top; }
+.diff td.n { width: 1%; color: var(--faint); text-align: right; user-select: none; padding: 0 6px; font-size: 11px; }
+.diff tr.a td { background: var(--add-bg); } .diff tr.a td.n { background: var(--add-gutter); color: var(--add-ink); }
+.diff tr.d td { background: var(--del-bg); } .diff tr.d td.n { background: var(--del-gutter); color: var(--del-ink); }
+.diff tr.hh td { background: var(--panel-2); color: var(--muted); padding: 3px 10px; font-size: 11.5px; }
+.diff tr.hl td { box-shadow: inset 3px 0 0 var(--accent); }
+.diff td.c { width: 100%; }
+.diff .fn { padding: 6px 12px; font-size: 12px; font-family: var(--mono); color: var(--muted); background: var(--panel-2); border-bottom: 1px solid var(--line-2); display: flex; justify-content: space-between; gap: 8px; }
+.callers { font-family: var(--mono); font-size: 12px; border-top: 1px solid var(--line-2); padding: 6px 14px 8px; }
+.callers div { padding: 2px 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.callers div b { color: var(--ink); font-weight: 500; }
+.callers .out { color: var(--med); }
+
+/* ---------- files ---------- */
+.fileblock { scroll-margin-top: 76px; }
+.fileblock .fh { display: grid; grid-template-columns: 22px 30px minmax(0, 1fr) auto; gap: 10px; padding: 10px 14px; align-items: center; cursor: pointer; }
+.fileblock .fh .rk { color: var(--faint); font-variant-numeric: tabular-nums; font-size: 12px; text-align: right; }
+.fileblock .fh .path { font-family: var(--mono); font-size: 13px; font-weight: 600; word-break: break-all; }
+.fileblock .fh .why { all: unset; font-size: 12px; color: var(--muted); display: block; }
+.fileblock .stats { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+.cat { font-size: 10.5px; padding: 0 6px; border-radius: 4px; background: var(--line-2); color: var(--muted); margin-left: 6px; font-family: var(--sans); font-weight: 500; vertical-align: 1px; }
+
+.toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 50; }
+.toast.on { opacity: 1; }
+.err { color: var(--high); padding: 40px; font-family: var(--mono); }
+.kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; color: var(--muted); }
+
+@media (max-width: 900px) {
+  .top { position: static; }
+  section.sec, .fileblock { scroll-margin-top: 64px; }
+  .wrap { grid-template-columns: 1fr; gap: 0; padding: 0 12px 100px; }
+  nav.rail { position: sticky; top: 0; z-index: 10; max-height: none; overflow-x: auto; display: flex; gap: 4px; padding: 8px 0; background: var(--bg); border-bottom: 1px solid var(--line); margin: 0 -12px 16px; padding-left: 12px; }
+  nav.rail h6, nav.rail .files { display: none; }
+  .rail a.sec { white-space: nowrap; gap: 6px; }
+  .top-in { padding: 8px 12px; gap: 8px; }
+  .ref { max-width: 100%; order: 5; flex-basis: 100%; }
+  .intent { grid-template-columns: 1fr; } .intent > div { border-left: 0; border-top: 1px solid var(--line-2); }
+  .ba { grid-template-columns: 1fr; } .ba > div + div { border-left: 0; border-top: 1px solid var(--line-2); }
+  .routes .r { grid-template-columns: 22px 54px minmax(0, 1fr); } .routes .r > .loc { grid-column: 3; }
+  .row { grid-template-columns: 22px minmax(0, 1fr); } .row > .loc { grid-column: 2; }
+  .ops li { grid-template-columns: 1fr; gap: 0; }
+  .hero .summary { font-size: 15px; }
+  .progress .bar { width: 50px; }
+}
+</style>
+</head>
+<body>
+<header class="top"><div class="top-in" id="top"></div></header>
+<div class="wrap">
+  <nav class="rail" id="rail"></nav>
+  <main id="main"><div class="empty" style="padding:40px 0">Loading report…</div></main>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+(() => {
+"use strict";
+let R = null;                  // report
+let HUNKS = {};                // id -> {file, hunk}
+let FILES = {};                // path -> file
+let reviewed = {};
+let riskFilter = "all";
+const STATIC = !!window.__GLANCE_REPORT__;
+
+// ------------------------------------------------------------------ helpers
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (k === "html") el.innerHTML = v;
+    else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat(Infinity)) {
+    if (kid == null || kid === false) continue;
+    el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const rich = s => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>");
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+function toast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.classList.add("on"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("on"), 1800); }
+
+function storeKey() { return `glance:${R.repo_path}:${R.base.rev}:${R.head.ref}`; }
+function loadReviewed() { try { reviewed = JSON.parse(localStorage.getItem(storeKey()) || "{}") || {}; } catch { reviewed = {}; } }
+function saveReviewed() { try { localStorage.setItem(storeKey(), JSON.stringify(reviewed)); } catch {} updateProgress(); }
+
+function check(id, rowEl) {
+  const c = h("input", { type: "checkbox", class: "chk", title: "Mark reviewed" });
+  c.checked = !!reviewed[id];
+  if (rowEl && c.checked) rowEl.classList.add("done");
+  c.addEventListener("change", () => {
+    if (c.checked) reviewed[id] = 1; else delete reviewed[id];
+    rowEl && rowEl.classList.toggle("done", c.checked);
+    saveReviewed();
+    renderRailFiles();
+  });
+  return c;
+}
+
+function reviewables() {
+  const ids = [];
+  R.risks.forEach(r => ids.push(r.id));
+  R.changes.filter(c => c.kind !== "function" || c.signature_changed || c.status !== "modified").forEach(c => ids.push(c.id));
+  R.files.forEach(f => ids.push("f:" + f.path));
+  return ids;
+}
+function updateProgress() {
+  const ids = reviewables();
+  const done = ids.filter(i => reviewed[i]).length;
+  const el = document.getElementById("prog");
+  if (!el) return;
+  el.querySelector("span.t").textContent = `${done}/${ids.length} reviewed`;
+  el.querySelector(".bar > span").style.width = (ids.length ? (100 * done / ids.length) : 0) + "%";
+}
+
+// ------------------------------------------------------------------ diff rendering
+function diffTable(hunkIds, opts = {}) {
+  const wrap = h("div", { class: "diff" });
+  const byFile = {};
+  for (const id of hunkIds) {
+    const x = HUNKS[id];
+    if (!x) continue;
+    (byFile[x.file] = byFile[x.file] || []).push(x.hunk);
+  }
+  const files = Object.keys(byFile);
+  if (!files.length) { wrap.append(h("div", { class: "empty", style: "padding:8px 12px" }, "No diff lines for this item.")); return wrap; }
+  for (const f of files) {
+    if (opts.showFile !== false) wrap.append(h("div", { class: "fn" }, h("span", {}, f), h("a", { href: "#file-" + (FILES[f] || {}).rank, onclick: e => { e.preventDefault(); jumpFile(f); } }, "open file ↗")));
+    const t = h("table");
+    for (const hk of byFile[f].sort((a, b) => a.new_start - b.new_start)) {
+      t.append(h("tr", { class: "hh" }, h("td", { colspan: 3 }, `@@ -${hk.old_start},${hk.old_len} +${hk.new_start},${hk.new_len} @@ ${hk.header || ""}`)));
+      for (const l of hk.lines) {
+        const cls = l[0] === "+" ? "a" : l[0] === "-" ? "d" : "";
+        const hl = opts.highlightLine && (l[2] === opts.highlightLine) ? " hl" : "";
+        t.append(h("tr", { class: cls + hl }, h("td", { class: "n" }, l[1] ?? ""), h("td", { class: "n" }, l[2] ?? ""), h("td", { class: "c" }, (l[0] === " " ? " " : l[0]) + l[3])));
+      }
+    }
+    wrap.append(t);
+  }
+  return wrap;
+}
+
+function codeToggle(container, hunkIds, label = "show code", opts = {}) {
+  if (!hunkIds || !hunkIds.length) return null;
+  let open = null;
+  const b = h("button", { class: "toggle" }, label);
+  b.addEventListener("click", () => {
+    if (open) { open.remove(); open = null; b.textContent = label; return; }
+    open = diffTable(hunkIds, opts);
+    container.append(open);
+    b.textContent = "hide code";
+  });
+  return b;
+}
+
+function jumpFile(path) {
+  const el = document.getElementById("file-" + (FILES[path] || {}).rank);
+  if (!el) return;
+  if (!el._open) el.querySelector(".fh").click();
+  el.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function loc(file, line) {
+  if (!file) return null;
+  return h("span", { class: "loc", title: "Jump to file diff", onclick: () => jumpFile(file) }, `${file}${line ? ":" + line : ""}`);
+}
+
+// ------------------------------------------------------------------ top bar + rail
+function renderTop() {
+  const top = document.getElementById("top");
+  top.innerHTML = "";
+  const sev = { high: 0, medium: 0, low: 0 };
+  R.risks.forEach(r => sev[r.severity]++);
+  const llm = R.llm || {};
+  (llm.concerns || []).forEach(c => sev[c.severity] = (sev[c.severity] || 0) + 1);
+  const head = R.head.worktree ? "working tree" : R.head.ref;
+  top.append(
+    h("div", { class: "brand" }, h("i"), "glance"),
+    h("div", { class: "ref", title: `${R.repo_path}` }, h("b", {}, R.repo), "  ", R.base.ref, " … ", h("b", {}, head), R.branch && R.head.worktree ? `  (${R.branch})` : ""),
+    h("span", { class: "pill mono" }, h("span", { class: "add" }, "+" + R.stats.additions), h("span", { class: "del" }, "−" + R.stats.deletions), h("span", { style: "color:var(--muted)" }, plural(R.stats.files, "file"))),
+    sev.high ? h("span", { class: "pill h" }, sev.high + " high") : null,
+    sev.medium ? h("span", { class: "pill m" }, sev.medium + " medium") : null,
+    sev.low ? h("span", { class: "pill l" }, sev.low + " low") : null,
+    h("div", { class: "spacer" }),
+    h("div", { class: "progress", id: "prog" }, h("div", { class: "bar" }, h("span")), h("span", { class: "t" }, "")),
+    STATIC ? null : h("button", { class: "btn", id: "refresh", title: "Re-run analysis on the current working tree", onclick: refresh }, "↻ Refresh"),
+  );
+  updateProgress();
+}
+
+const SECTIONS = [
+  ["overview", "Overview"], ["risks", "Risks"], ["logic", "Business logic"], ["data", "Data layer"],
+  ["interfaces", "Endpoints & tasks"], ["functions", "Functions"], ["files", "Files"],
+];
+function sectionCounts() {
+  const llm = R.llm || {};
+  const k = kinds => R.changes.filter(c => kinds.includes(c.kind)).length;
+  return {
+    overview: "",
+    risks: R.risks.length + (llm.concerns || []).length,
+    logic: (llm.business_logic || []).length + R.changes.filter(c => ["config", "agent"].includes(c.kind) && c.status !== "removed").length,
+    data: k(["migration", "table", "model", "type"]),
+    interfaces: k(["route", "task", "env", "dependency"]),
+    functions: functionChanges().length,
+    files: R.files.length,
+  };
+}
+function renderRail() {
+  const rail = document.getElementById("rail");
+  rail.innerHTML = "";
+  const counts = sectionCounts();
+  const hot = R.risks.some(r => r.severity === "high") || (R.llm?.concerns || []).some(c => c.severity === "high");
+  rail.append(h("h6", {}, "Review"));
+  for (const [id, label] of SECTIONS) {
+    rail.append(h("a", { class: "sec", href: "#" + id, "data-sec": id }, h("span", {}, label),
+      h("span", { class: "n" + (id === "risks" && hot ? " hot" : "") }, counts[id] === "" ? "" : counts[id])));
+  }
+  rail.append(h("h6", {}, "Reading order"), h("div", { class: "files", id: "railfiles" }));
+  renderRailFiles();
+}
+function fileSeverity(f) {
+  const rs = R.risks.filter(r => r.file === f.path);
+  return rs.some(r => r.severity === "high") ? "high" : rs.some(r => r.severity === "medium") ? "medium" : rs.length ? "low" : "none";
+}
+function renderRailFiles() {
+  const box = document.getElementById("railfiles");
+  if (!box) return;
+  box.innerHTML = "";
+  for (const f of R.files) {
+    box.append(h("div", { class: "file" + (reviewed["f:" + f.path] ? " done" : ""), title: f.path + "\n" + f.reasons.join(" · "), onclick: () => jumpFile(f.path) },
+      h("span", { class: "rk" }, f.rank), h("span", { class: "nm" }, "‎" + f.path), h("span", { class: "dot " + fileSeverity(f) })));
+  }
+}
+
+// ------------------------------------------------------------------ sections
+function secEl(id, title, ...kids) { return h("section", { class: "sec", id }, h("h2", {}, title), ...kids); }
+
+function renderOverview() {
+  const llm = R.llm || {};
+  const card = h("div", { class: "card" });
+  const hero = h("div", { class: "hero" });
+  hero.append(h("div", { class: "headline" }, R.summary.headline.split(" · ")[0], R.commits && R.commits.length ? " · " + plural(R.commits.length, "commit") : ""));
+  if (llm.status === "ok" && llm.summary) hero.append(h("div", { class: "summary" }, llm.summary));
+  else if (R.commits && R.commits.length) hero.append(h("div", { class: "summary" }, R.commits[0].split("\n")[0]));
+  if (R.summary.bullets.length) hero.append(h("ul", { class: "glance" }, R.summary.bullets.map(b => h("li", {}, b))));
+  card.append(hero);
+  if (llm.status === "running") card.append(h("div", { class: "llm-state" }, h("span", { class: "spin" }), "Claude is reading the diff for intent, business logic and bugs. Static analysis below is ready now."));
+  else if (llm.status === "error") card.append(h("div", { class: "llm-state" }, "Model pass failed: " + (llm.error || "unknown error")));
+  else if (llm.status === "skipped") card.append(h("div", { class: "llm-state" }, "Static analysis only. " + (llm.reason === "disabled" ? "Model pass disabled." : "Install the `claude` CLI or set ANTHROPIC_API_KEY for summaries, intent check and business-logic review.")));
+
+  const out = [card];
+  const it = llm.status === "ok" ? llm.intent : null;
+  if (it && (it.asked || (it.done || []).length)) {
+    const ic = h("div", { class: "card" });
+    if (it.asked) ic.append(h("div", { class: "asked" }, h("b", {}, "Asked"), it.asked));
+    const col = (cls, title, items, render) => h("div", { class: cls }, h("h4", {}, title), items && items.length ? h("ul", {}, items.map(render)) : h("div", { class: "empty" }, "—"));
+    ic.append(h("div", { class: "intent" },
+      col("done", "Done", it.done, d => h("li", {}, d)),
+      col("extra", "Not asked for", it.extra, e => {
+        const li = h("li", {}, typeof e === "string" ? e : e.text, " ");
+        if (e.hunks && e.hunks.length) { const t = codeToggle(li, e.hunks, "code"); li.append(t); }
+        return li;
+      }),
+      col("missing", "Missing", it.missing, m => h("li", {}, m))));
+    out.push(h("div", { style: "height:10px" }), ic);
+  }
+  if (llm.status === "ok" && (llm.walkthrough || []).length) {
+    const wc = h("div", { class: "card walk" });
+    wc.append(h("div", { class: "asked" }, h("b", {}, "Read in this order")));
+    for (const s of llm.walkthrough) {
+      const body = h("div", {}, s.step, " ");
+      body.append(codeToggle(body, s.hunks, "code"));
+      wc.append(h("div", { class: "step" }, body));
+    }
+    out.push(h("div", { style: "height:10px" }), wc);
+  }
+  return secEl("overview", "Overview", ...out);
+}
+
+function renderRisks() {
+  const llm = R.llm || {};
+  const items = [
+    ...(llm.status === "ok" ? (llm.concerns || []).map((c, i) => ({ id: "c:" + i + ":" + c.title, severity: c.severity, title: c.title, detail: c.detail, hunk_ids: c.hunks, file: HUNKS[c.hunks?.[0]]?.file, source: "Claude" })) : []),
+    ...R.risks.map(r => ({ ...r, source: "static" })),
+  ];
+  const order = { high: 0, medium: 1, low: 2 };
+  items.sort((a, b) => order[a.severity] - order[b.severity] || (a.source === "Claude" ? -1 : 1) - (b.source === "Claude" ? -1 : 1));
+  if (!items.length) return secEl("risks", "Risks", h("div", { class: "empty" }, "Nothing flagged."));
+  const counts = { all: items.length, high: 0, medium: 0, low: 0 };
+  items.forEach(i => counts[i.severity]++);
+  const list = h("div", { class: "card" });
+  const draw = () => {
+    list.innerHTML = "";
+    for (const it of items) {
+      if (riskFilter !== "all" && it.severity !== riskFilter) continue;
+      const row = h("div", { class: "row" });
+      const body = h("div", { class: "body" },
+        h("div", { class: "title" }, it.title),
+        it.detail ? h("div", { class: "detail", html: rich(it.detail) }) : null);
+      const meta = h("div", { class: "meta" }, h("span", { class: "sev " + it.severity }, it.severity), h("span", { class: "src" }, it.source));
+      const t = codeToggle(body, it.hunk_ids, "show code", { highlightLine: it.line });
+      if (t) meta.append(t);
+      body.append(meta);
+      row.append(check(it.id, row), body, loc(it.file, it.line) || h("span"));
+      list.append(row);
+    }
+  };
+  const filters = h("div", { class: "filters" }, ["all", "high", "medium", "low"].filter(s => s === "all" || counts[s]).map(s =>
+    h("button", { class: "btn" + (riskFilter === s ? " on" : ""), onclick: e => { riskFilter = s; [...filters.children].forEach(b => b.classList.remove("on")); e.target.classList.add("on"); draw(); } }, `${s} ${counts[s]}`)));
+  draw();
+  return secEl("risks", "Risks", filters, list);
+}
+
+function wordDiff(a, b) {
+  const A = (a || "").split(/(\s+)/), B = (b || "").split(/(\s+)/);
+  const n = A.length, m = B.length;
+  if (n * m > 400000) return esc(b);
+  const dp = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  let i = 0, j = 0, out = "";
+  while (i < n && j < m) {
+    if (A[i] === B[j]) { out += esc(A[i]); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { out += `<del>${esc(A[i])}</del>`; i++; }
+    else { out += `<ins>${esc(B[j])}</ins>`; j++; }
+  }
+  while (i < n) out += `<del>${esc(A[i++])}</del>`;
+  while (j < m) out += `<ins>${esc(B[j++])}</ins>`;
+  return out;
+}
+
+function renderLogic() {
+  const llm = R.llm || {};
+  const out = [];
+  if (llm.status === "ok" && (llm.business_logic || []).length) {
+    for (const b of llm.business_logic) {
+      const c = h("div", { class: "card" });
+      const id = "bl:" + b.title;
+      const hd = h("div", { class: "row" });
+      const body = h("div", { class: "body" }, h("div", { class: "title" }, b.title));
+      const t = codeToggle(c, b.hunks, "show code");
+      hd.append(check(id, hd), body, t || h("span"));
+      c.append(hd, h("div", { class: "ba" }, h("div", {}, h("h5", {}, "Before"), b.before || "—"), h("div", {}, h("h5", {}, "After"), b.after || "—")));
+      if (b.why_it_matters) c.append(h("div", { class: "why" }, h("b", {}, "Why it matters  "), b.why_it_matters));
+      out.push(c);
+    }
+  } else if (llm.status === "running") {
+    out.push(h("div", { class: "card llm-state" }, h("span", { class: "spin" }), "Waiting for the model pass…"));
+  }
+  const consts = R.changes.filter(c => c.kind === "config" && c.status !== "removed");
+  if (consts.length) {
+    const card = h("div", { class: "card" });
+    for (const c of consts) {
+      const row = h("div", { class: "constrow" });
+      const val = c.status === "added"
+        ? h("div", { class: "cval" }, h("span", { class: "now" }, c.after.signature))
+        : h("div", { class: "cval" }, h("span", { class: "was" }, c.before.signature), h("span", { class: "arrow" }, "→"), h("span", { class: "now" }, c.after.signature));
+      const body = h("div", { class: "body" }, h("div", { class: "title mono" }, c.name, " ", h("span", { class: "st " + c.status }, c.status)), val);
+      const t = codeToggle(body, c.hunk_ids);
+      row.append(check(c.id, row), body, h("div", {}, loc(c.file, c.line)));
+      if (t) body.append(h("div", { class: "meta" }, t));
+      card.append(row);
+    }
+    out.push(h("div", { style: "height:10px" }), h("div", { class: "src", style: "margin:0 0 6px 2px" }, "Constants"), card);
+  }
+  const agents = R.changes.filter(c => c.kind === "agent");
+  for (const c of agents) {
+    const card = h("div", { class: "card ent" });
+    card.append(entHeader(c, card));
+    const bt = c.before?.fields?.text, at = c.after?.fields?.text;
+    if (bt != null || at != null) card.append(h("div", { class: "prompt-diff", html: c.status === "modified" ? wordDiff(bt, at) : esc(at ?? bt) }));
+    else card.append(fieldTable(c));
+    out.push(h("div", { style: "height:10px" }), card);
+  }
+  if (!out.length) out.push(h("div", { class: "empty" }, llm.status === "ok" ? "No business-logic changes identified." : "Constants, prompts and (with the model pass) business-rule changes show up here."));
+  return secEl("logic", "Business logic", ...out);
+}
+
+function entHeader(c, card) {
+  const hd = h("div", { class: "hd" });
+  const a = c.after || c.before || {};
+  const sub = h("div", { class: "sub" }, h("span", { class: "st " + c.status }, c.status), h("span", {}, c.kind), c.framework ? h("span", { class: "fw" }, c.framework) : null);
+  if (a.meta && a.meta.tablename && a.meta.tablename !== c.name) sub.append(h("span", { class: "mono" }, "table " + a.meta.tablename));
+  if (c.after && c.after.moved_from) sub.append(h("span", {}, "moved from " + c.after.moved_from));
+  const body = h("div", {}, h("div", { class: "nm" }, c.name), sub);
+  hd.append(check(c.id, card || hd), body, loc(c.file, c.line) || h("span"));
+  return hd;
+}
+
+function fieldTable(c, limit = 14) {
+  const rows = c.field_changes || [];
+  const after = (c.after && c.after.fields) || {};
+  const changed = new Set(rows.map(r => r.name).concat(rows.filter(r => r.from).map(r => r.from)));
+  const t = h("table", { class: "f" });
+  for (const r of rows) {
+    const tr = h("tr", { class: r.change });
+    const mark = { added: "+", removed: "−", changed: "~", renamed: "↷" }[r.change];
+    let val;
+    if (r.change === "changed") val = h("td", {}, h("span", { class: "was" }, r.before), h("span", { class: "now" }, r.after));
+    else if (r.change === "renamed") val = h("td", {}, h("span", { class: "was" }, r.before), h("span", { class: "now" }, r.after));
+    else val = h("td", {}, r.after ?? r.before ?? "");
+    tr.append(h("td", { class: "m" }, mark), h("td", { class: "k" }, r.name), val);
+    t.append(tr);
+  }
+  // unchanged fields for context (collapsed)
+  const same = Object.entries(after).filter(([k]) => !changed.has(k));
+  const frag = h("div");
+  if (rows.length) frag.append(t);
+  if (same.length && c.status !== "added") {
+    const b = h("div", { class: "more" }, h("button", { class: "toggle" }, `${plural(same.length, "unchanged field")}`));
+    b.firstChild.addEventListener("click", () => {
+      const t2 = h("table", { class: "f" });
+      for (const [k, v] of same) t2.append(h("tr", { class: "same" }, h("td", { class: "m" }, ""), h("td", { class: "k" }, k), h("td", {}, v)));
+      b.replaceWith(t2);
+    });
+    frag.append(b);
+  }
+  return frag;
+}
+
+function opClass(op) {
+  if (/drop|delete|truncate/.test(op)) return "bad";
+  if (/create|add|insert/.test(op)) return "good";
+  return "mid";
+}
+
+function renderData() {
+  const items = R.changes.filter(c => ["migration", "table", "model", "type"].includes(c.kind));
+  const order = { migration: 0, table: 1, model: 2, type: 3 };
+  items.sort((a, b) => order[a.kind] - order[b.kind] || a.file.localeCompare(b.file) || a.line - b.line);
+  if (!items.length) return secEl("data", "Data layer", h("div", { class: "empty" }, "No schema, model or migration changes."));
+  const grid = h("div", { class: "grid2" });
+  for (const c of items) {
+    const card = h("div", { class: "card ent" });
+    const hd = entHeader(c, card);
+    card.append(hd);
+    const m = (c.after || c.before || {}).meta || {};
+    if (c.kind === "migration") {
+      if (m.message && m.message !== c.name) hd.querySelector(".nm").after(h("div", { style: "font-size:13px;color:var(--ink-2)" }, m.message));
+      const ul = h("ul", { class: "ops" });
+      for (const op of (m.upgrade || [])) {
+        const tgt = (op.table || "") + (op.column ? "." + op.column : "");
+        ul.append(h("li", {}, h("span", { class: "op " + opClass(op.op) }, op.op), h("span", {}, h("span", { class: "tgt" }, tgt), op.detail ? h("span", { class: "det" }, op.detail) : null)));
+      }
+      if (!(m.upgrade || []).length) ul.append(h("li", {}, h("span", { class: "op mid" }, "—"), h("span", { class: "det" }, "No recognised operations")));
+      card.append(ul);
+      if (m.downgrade_empty && !m.forward_only) card.append(h("div", { class: "warnline" }, "No downgrade — this migration can't be rolled back."));
+    } else {
+      card.append(fieldTable(c));
+      const metaCh = (c.meta_changes || []).filter(x => !["validators"].includes(x.key));
+      for (const mc of metaCh) card.append(h("div", { class: "sig" }, h("span", { style: "color:var(--muted)" }, mc.key + ": "), h("span", { class: "was" }, JSON.stringify(mc.before)), h("span", { class: "now" }, JSON.stringify(mc.after))));
+      if ((c.meta_changes || []).some(x => x.key === "validators")) card.append(h("div", { class: "more" }, "Validators changed"));
+    }
+    const t = codeToggle(card, c.hunk_ids);
+    if (t) card.append(h("div", { class: "more" }, t));
+    grid.append(card);
+  }
+  return secEl("data", "Data layer", grid);
+}
+
+const AUTHY = /auth|user|token|guard|jwt|session|permission|require|admin|role|protect|login|verify|api_?key|scope/i;
+function renderInterfaces() {
+  const out = [];
+  const routes = R.changes.filter(c => c.kind === "route");
+  if (routes.length) {
+    const card = h("div", { class: "card routes" });
+    const ord = { removed: 0, added: 1, modified: 2, moved: 3 };
+    routes.sort((a, b) => ord[a.status] - ord[b.status]);
+    for (const c of routes) {
+      const m = (c.after || c.before).meta || {};
+      const meth = (m.methods || [c.name.split(" ")[0]])[0].toUpperCase();
+      const deps = m.dependencies || [];
+      const authed = deps.some(d => AUTHY.test(d));
+      const tags = h("div", { class: "tags" }, h("span", { class: "st " + c.status }, c.status), h("span", { class: "fw" }, c.framework));
+      if (c.framework !== "next-action" && c.framework !== "trpc") tags.append(authed ? h("span", { class: "lock" }, "🔒 " + deps.filter(d => AUTHY.test(d)).join(", ")) : h("span", { class: "nolock" }, "no auth"));
+      if (m.response_model) tags.append(h("span", {}, "→ " + m.response_model));
+      if (m.status_code) tags.append(h("span", {}, "status " + m.status_code));
+      if (m.handler_body_changed) tags.append(h("span", { style: "color:var(--med)" }, "handler logic changed"));
+      for (const mc of (c.meta_changes || [])) if (["dependencies", "response_model", "status_code"].includes(mc.key)) tags.append(h("span", { style: "color:var(--med)" }, mc.key + " changed"));
+      const pathTxt = c.framework === "trpc" ? c.name.replace(/^trpc /, "") : (m.path || c.name);
+      const body = h("div", { class: "body" }, h("div", { class: "p " + (c.status === "removed" ? "removed" : "") }, pathTxt, m.handler && m.handler !== "inline" ? h("span", { style: "color:var(--faint)" }, "  → " + m.handler) : null), tags);
+      const fields = c.after?.fields || {};
+      const params = Object.entries(fields).filter(([k]) => !/^(req|res|reply|request|ctx|next)$/.test(k));
+      if (params.length) body.append(h("div", { class: "tags mono" }, params.slice(0, 6).map(([k, v]) => h("span", {}, `${k}: ${v}`))));
+      const t = codeToggle(body, c.hunk_ids);
+      if (t) body.lastChild.after(h("div", { class: "tags" }, t));
+      const row = h("div", { class: "r" });
+      row.append(check(c.id, row), h("span", { class: "meth " + (["GET", "POST", "PUT", "PATCH", "DELETE"].includes(meth) ? meth : "other") }, meth.length > 6 ? meth.slice(0, 6) : meth), body, loc(c.file, c.line));
+      card.append(row);
+    }
+    out.push(h("div", { class: "src", style: "margin:0 0 6px 2px" }, "Endpoints"), card);
+  }
+  const groups = [["task", "Tasks, workflows & queues"], ["env", "Environment variables"], ["dependency", "Dependencies"]];
+  for (const [kind, label] of groups) {
+    const items = R.changes.filter(c => c.kind === kind);
+    if (!items.length) continue;
+    const card = h("div", { class: "card" });
+    for (const c of items) {
+      const row = h("div", { class: "row" });
+      const a = c.after || c.before;
+      let detail = "";
+      if (kind === "env") detail = c.after ? (a.fields.default === "(required)" ? "required — no default" : "default: " + a.fields.default) : "no longer read";
+      else if (kind === "dependency") detail = c.status === "modified" ? `${c.before.signature} → ${c.after.signature}` : a.signature;
+      else detail = a.signature;
+      const body = h("div", { class: "body" }, h("div", { class: "title mono" }, c.name, " ", h("span", { class: "st " + c.status }, c.status), " ", c.framework ? h("span", { class: "fw" }, c.framework) : null),
+        h("div", { class: "detail mono" }, detail));
+      if (kind === "task" && c.field_changes?.length && c.status !== "added") body.append(fieldTable(c));
+      for (const mc of (c.meta_changes || [])) if (!["handler"].includes(mc.key)) body.append(h("div", { class: "sig", style: "padding:6px 0 0;border:0" }, h("span", { style: "color:var(--muted)" }, mc.key + ": "), h("span", { class: "was" }, typeof mc.before === "string" ? mc.before : JSON.stringify(mc.before)), h("span", { class: "now" }, typeof mc.after === "string" ? mc.after : JSON.stringify(mc.after))));
+      const t = codeToggle(body, c.hunk_ids);
+      if (t) body.append(h("div", { class: "meta" }, t));
+      row.append(check(c.id, row), body, loc(c.file, c.line) || h("span"));
+      card.append(row);
+    }
+    out.push(h("div", { style: "height:14px" }), h("div", { class: "src", style: "margin:0 0 6px 2px" }, label), card);
+  }
+  if (!out.length) out.push(h("div", { class: "empty" }, "No endpoint, task, env or dependency changes."));
+  return secEl("interfaces", "Endpoints & tasks", ...out);
+}
+
+function functionChanges() {
+  return R.changes.filter(c => c.kind === "function" && (c.status !== "modified" || c.signature_changed || c.body_changed));
+}
+function renderFunctions() {
+  const fns = functionChanges();
+  if (!fns.length) return secEl("functions", "Functions", h("div", { class: "empty" }, "No function changes."));
+  const ord = { removed: 0, moved: 1, modified: 2, added: 3 };
+  fns.sort((a, b) => (b.signature_changed - a.signature_changed) || ord[a.status] - ord[b.status] || a.file.localeCompare(b.file) || a.line - b.line);
+  const card = h("div", { class: "card" });
+  for (const c of fns) {
+    const row = h("div", { class: "row" });
+    const body = h("div", { class: "body" });
+    const tagTxt = c.status === "modified" ? (c.signature_changed ? "signature changed" : "body changed") : c.status;
+    body.append(h("div", { class: "title mono" }, c.name, " ", h("span", { class: "st " + (c.signature_changed ? "modified" : c.status) }, tagTxt)));
+    if (c.signature_changed && c.before && c.after) body.append(h("div", { class: "sig", style: "padding:6px 0 0;border:0" }, h("span", { class: "was" }, c.before.signature), h("span", { class: "now" }, c.after.signature)));
+    else body.append(h("div", { class: "detail mono", style: "color:var(--muted)" }, (c.after || c.before).signature));
+    const meta = h("div", { class: "meta" });
+    const t = codeToggle(body, c.hunk_ids);
+    if (t) meta.append(t);
+    if (c.callers && c.callers.length) {
+      const outside = c.callers.filter(x => !x.in_diff).length;
+      const b = h("button", { class: "toggle" }, `${plural(c.callers.length, "reference")}${outside ? ` (${outside} outside this diff)` : ""}`);
+      let open = null;
+      b.addEventListener("click", () => {
+        if (open) { open.remove(); open = null; return; }
+        open = h("div", { class: "callers" }, c.callers.map(x => h("div", { class: x.in_diff ? "" : "out" }, h("b", {}, `${x.file}:${x.line}`), "  ", x.text)));
+        body.append(open);
+      });
+      meta.append(b);
+    }
+    if (meta.childNodes.length) body.append(meta);
+    row.append(check(c.id, row), body, loc(c.file, c.line));
+    card.append(row);
+  }
+  return secEl("functions", "Functions", card);
+}
+
+function renderFiles() {
+  const out = [];
+  for (const f of R.files) {
+    const card = h("div", { class: "card fileblock", id: "file-" + f.rank });
+    const sev = fileSeverity(f);
+    const fh = h("div", { class: "fh" });
+    const chk = check("f:" + f.path, card);
+    chk.addEventListener("click", e => e.stopPropagation());
+    fh.append(chk, h("span", { class: "rk" }, "#" + f.rank),
+      h("div", {}, h("div", { class: "path" }, h("span", { class: "dot " + sev, style: "margin-right:8px;vertical-align:1px" }), f.path, h("span", { class: "cat" }, f.category), f.status !== "modified" ? h("span", { class: "cat" }, f.status) : null),
+        h("span", { class: "why" }, f.reasons.join(" · "))),
+      h("span", { class: "stats" }, h("span", { class: "add" }, "+" + f.additions), " ", h("span", { class: "del" }, "−" + f.deletions)));
+    fh.addEventListener("click", () => {
+      if (card._open) { card._open.remove(); card._open = null; return; }
+      if (!f.hunks.length) { card._open = h("div", { class: "more" }, f.binary ? "Binary file" : f.category === "lockfile" || f.category === "generated" ? "Diff hidden (" + f.category + ")" : "No textual diff"); }
+      else card._open = diffTable(f.hunks.map(x => x.id), { showFile: false });
+      card.append(card._open);
+    });
+    card.append(fh);
+    out.push(card);
+  }
+  return secEl("files", "Files — risk-ranked reading order", ...out);
+}
+
+// ------------------------------------------------------------------ boot
+function indexReport() {
+  HUNKS = {}; FILES = {};
+  for (const f of R.files) { FILES[f.path] = f; for (const hk of f.hunks) HUNKS[hk.id] = { file: f.path, hunk: hk }; }
+}
+
+function render() {
+  indexReport();
+  loadReviewed();
+  document.title = `glance · ${R.repo}`;
+  renderTop();
+  renderRail();
+  const main = document.getElementById("main");
+  const y = window.scrollY;
+  main.innerHTML = "";
+  if (R.errors && R.errors.length) main.append(h("div", { class: "card", style: "padding:10px 16px;margin-bottom:16px;color:var(--high);font-size:13px" }, R.errors.join("\n")));
+  main.append(renderOverview(), renderRisks(), renderLogic(), renderData(), renderInterfaces(), renderFunctions(), renderFiles());
+  window.scrollTo(0, y);
+  updateProgress();
+  observeSections();
+}
+
+let obs;
+function observeSections() {
+  if (obs) obs.disconnect();
+  obs = new IntersectionObserver(entries => {
+    for (const e of entries) if (e.isIntersecting) {
+      document.querySelectorAll(".rail a.sec").forEach(a => a.classList.toggle("on", a.dataset.sec === e.target.id));
+    }
+  }, { rootMargin: "-80px 0px -70% 0px" });
+  document.querySelectorAll("section.sec").forEach(s => obs.observe(s));
+}
+
+async function fetchReport() {
+  const r = await fetch("/api/report", { cache: "no-store" });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+
+let polling = false;
+async function poll(untilChangedFrom) {
+  if (polling) return;
+  polling = true;
+  try {
+    for (let i = 0; i < 400; i++) {
+      await new Promise(res => setTimeout(res, 2500));
+      const next = await fetchReport();
+      const llmChanged = (next.llm || {}).status !== (R.llm || {}).status;
+      const idChanged = untilChangedFrom && next.id !== untilChangedFrom;
+      if (idChanged || llmChanged || (next._rebuilding === false && untilChangedFrom && next.id !== R.id)) {
+        R = next; render();
+        if (idChanged) toast("Report refreshed");
+        if ((R.llm || {}).status === "ok" && llmChanged) toast("Model pass finished");
+      }
+      if ((R.llm || {}).status !== "running" && !next._rebuilding && (!untilChangedFrom || next.id !== untilChangedFrom)) break;
+    }
+  } catch (e) { console.warn(e); }
+  polling = false;
+}
+
+async function refresh() {
+  const b = document.getElementById("refresh");
+  if (b) { b.disabled = true; b.textContent = "Refreshing…"; }
+  const before = R.id;
+  try { await fetch("/api/refresh", { method: "POST" }); } catch {}
+  await poll(before);
+  const b2 = document.getElementById("refresh");
+  if (b2) { b2.disabled = false; b2.textContent = "↻ Refresh"; }
+}
+
+async function boot() {
+  try {
+    R = STATIC ? window.__GLANCE_REPORT__ : await fetchReport();
+  } catch (e) {
+    document.getElementById("main").innerHTML = `<div class="err">Couldn't load report: ${esc(e.message)}</div>`;
+    return;
+  }
+  render();
+  if (!STATIC && (R.llm || {}).status === "running") poll();
+}
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT" || e.metaKey || e.ctrlKey) return;
+  if (e.key === "r" && !STATIC) refresh();
+});
+boot();
+})();
+</script>
+</body>
+</html>
