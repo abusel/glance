@@ -144,10 +144,15 @@ def cmd_review(args) -> int:
         _write(repo, cur)
 
     def rebuild() -> None:
+        """Re-analyze (seconds). Static risks are recomputed; the AI pass is carried forward, not re-run:
+        concerns whose code changed are marked stale for a one-by-one re-check."""
+        old = state.get()
         rep = build(args, repo)
+        rep["resolved"] = llm.resolved_since(old, rep)
+        rep["llm"] = llm.carry_over(old, rep)
         state.set(rep)
         _write(repo, rep)
-        if run_llm:
+        if run_llm and rep["llm"].get("status") != "ok":
             model_pass(rep)
 
     state.rebuild = rebuild
@@ -191,6 +196,50 @@ def cmd_review(args) -> int:
         return "running" if run_model_now() else "saved"
 
     state.set_intent = set_intent
+
+    def recheck(concern_id: str) -> bool:
+        """Re-check one AI concern against the current code, in the background."""
+        cur = state.get()
+        concerns = (cur.get("llm") or {}).get("concerns") or []
+        target = next((c for c in concerns if c.get("id") == concern_id), None)
+        if target is None or target.get("rechecking") or llm.available_provider(ui_provider) is None:
+            return False
+
+        def mutate(fn) -> None:
+            rep = dict(state.get())
+            lm = dict(rep.get("llm") or {})
+            lm["concerns"] = [fn(dict(c)) if c.get("id") == concern_id else c for c in lm.get("concerns") or []]
+            lm["rechecking"] = [c["id"] for c in lm["concerns"] if c.get("rechecking")]
+            rep["llm"] = lm
+            state.set(rep)
+
+        mutate(lambda c: {**c, "rechecking": True})
+
+        def work() -> None:
+            res = llm.recheck(state.get(), target, provider=ui_provider, model=args.model)
+
+            def apply(c: dict) -> dict:
+                c.pop("rechecking", None)
+                if res.get("error"):
+                    c["recheck_error"] = res["error"]
+                    return c
+                c.pop("recheck_error", None)
+                c.update(verdict=res["verdict"], recheck_note=res["explanation"], stale=False,
+                         checked_at=time.strftime("%H:%M"))
+                if res["hunks"]:
+                    c["hunks"] = res["hunks"]
+                cur_files = {f["path"]: f for f in state.get()["files"]}
+                live = {h["id"]: h for f in cur_files.values() for h in f["hunks"]}
+                c["fingerprint"] = {h: llm._hunk_print(live[h]) for h in c.get("hunks") or [] if h in live}  # baseline for the next edit
+                return c
+
+            mutate(apply)
+            _write(repo, state.get())
+
+        threading.Thread(target=work, daemon=True).start()
+        return True
+
+    state.recheck = recheck
     _write(repo, report)
     if run_llm:
         report["llm"] = {"status": "running", "provider": llm.available_provider(args.llm)}

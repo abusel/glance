@@ -341,3 +341,31 @@ def test_saved_intent_is_per_branch(tmp_path):
     p.parent.mkdir(parents=True); p.write_text("Add a $2 fee\n")
     assert _read_intent(args, tmp_path) == "Add a $2 fee"
     assert _read_intent(argparse.Namespace(intent="cli wins", intent_file=None, head=None), tmp_path) == "cli wins"
+
+
+def test_refresh_carries_ai_and_tracks_resolved(py_report):
+    import copy
+
+    from glance.llm import attach_evidence, carry_over, resolved_since
+
+    old = copy.deepcopy(py_report)
+    files = [f for f in old["files"] if f["hunks"]]
+    h1, h2 = files[0]["hunks"][0]["id"], files[-1]["hunks"][0]["id"]
+    old["llm"] = attach_evidence({"status": "ok", "concerns": [
+        {"severity": "high", "title": "A", "detail": "a", "hunks": [h1]},
+        {"severity": "low", "title": "B", "detail": "b", "hunks": [h2]}], "business_logic": [], "walkthrough": [],
+        "story": {"units": {old["story"]["units"][0]["id"]: {"what": "w", "why": "y"}}, "how_it_works": []}}, old)
+    assert old["llm"]["concerns"][0]["evidence"] and old["llm"]["concerns"][0]["files"] == [files[0]["path"]]
+
+    new = copy.deepcopy(py_report)                 # simulate editing the code behind concern A, in place:
+    for f in new["files"]:                         # same positional hunk id, different content
+        for h in f["hunks"]:
+            if h["id"] == h1:
+                h["lines"].append(["+", None, 999, "# fixed"])
+    gone = new["risks"].pop(0)                     # and fixing one static risk
+    carried = carry_over(old, new)
+    a, b = carried["concerns"]
+    assert a["stale"] and a["hunks"] == [h1] and not b.get("stale")
+    assert carried["carried"] and set(carried["story"]["units"]) == {new["story"]["units"][0]["id"]}
+    assert [r["title"] for r in resolved_since(old, new)] == [gone["title"]]
+    assert carry_over({"llm": {"status": "skipped"}}, new)["status"] == "skipped"

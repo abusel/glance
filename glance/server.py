@@ -24,6 +24,7 @@ class State:
         self.rebuilding = False
         self.run_model: Callable[[], bool] | None = None
         self.set_intent: Callable[[str], str] | None = None
+        self.recheck: Callable[[str], bool] | None = None
 
     def get(self) -> dict[str, Any]:
         with self.lock:
@@ -122,6 +123,17 @@ def make_handler(state: State):
                 except (ValueError, TypeError):
                     return self._send(400, b'{"error":"bad request"}')
                 return self._send(200, json.dumps({"status": state.set_intent(text)}).encode())
+            if u.path == "/api/recheck":
+                if not self._same_origin():
+                    return self._send(403, b'{"error":"cross-origin"}')
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    cid = str(json.loads(self.rfile.read(min(n, 10_000)) or b"{}").get("id") or "")
+                except (ValueError, TypeError):
+                    return self._send(400, b'{"error":"bad request"}')
+                if not state.recheck or not state.recheck(cid):
+                    return self._send(409, b'{"error":"unknown concern, already re-checking, or no AI available"}')
+                return self._send(202, b'{"ok":true}')
             if u.path == "/api/llm":
                 if not self._same_origin():
                     return self._send(403, b'{"error":"cross-origin"}')

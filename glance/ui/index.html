@@ -111,6 +111,17 @@ section.sec > h2::after { order: 2; }
 .backbtn.on { display: inline-flex; }
 .backbtn:hover { border-color: var(--accent); color: var(--accent); }
 
+/* ---------- re-check ---------- */
+.verdict { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; }
+.verdict.fixed { color: var(--add-ink); background: var(--add-bg); }
+.verdict.still_present { color: var(--high); background: var(--high-soft); }
+.verdict.partly_fixed, .verdict.stale { color: var(--med); background: var(--med-soft); }
+.row.fixed .title { text-decoration: line-through; color: var(--muted); }
+.recheck-note { font-size: 13px; color: var(--ink-2); margin-top: 4px; padding-left: 10px; border-left: 2px solid var(--line); }
+.resolved { padding: 10px 16px; margin-bottom: 10px; }
+.resolved h4 { margin: 0 0 4px; font-size: 12px; color: var(--add-ink); letter-spacing: .04em; text-transform: uppercase; }
+.resolved li { font-size: 13px; color: var(--muted); text-decoration: line-through; }
+
 /* ---------- intent ---------- */
 .intentcard .asked { display: block; line-height: 1.55; }
 .intent-text { color: var(--ink); white-space: pre-line; }
@@ -572,7 +583,7 @@ function renderTop() {
   const sev = { high: 0, medium: 0, low: 0 };
   R.risks.forEach(r => sev[r.severity]++);
   const llm = R.llm || {};
-  (llm.concerns || []).forEach(c => sev[c.severity] = (sev[c.severity] || 0) + 1);
+  (llm.status === "ok" ? llm.concerns || [] : []).filter(c => c.verdict !== "fixed").forEach(c => sev[c.severity] = (sev[c.severity] || 0) + 1);
   const head = R.head.worktree ? "working tree" : R.head.ref;
   top.append(
     h("div", { class: "brand" }, h("i"), "glance"),
@@ -702,11 +713,13 @@ function renderOverview() {
 function riskItems() {
   const llm = R.llm || {};
   const items = [
-    ...(llm.status === "ok" ? (llm.concerns || []).map((c, i) => ({ id: "c:" + i + ":" + c.title, severity: c.severity, title: c.title, detail: c.detail, hunk_ids: c.hunks, file: HUNKS[c.hunks?.[0]]?.file, source: "Claude" })) : []),
+    ...(llm.status === "ok" ? (llm.concerns || []).map((c, i) => ({ id: "c:" + c.title, cid: c.id, severity: c.severity, title: c.title, detail: c.detail, hunk_ids: c.hunks,
+        file: HUNKS[c.hunks?.[0]]?.file || (c.files || [])[0], source: "Claude", verdict: c.verdict, note: c.recheck_note, at: c.checked_at,
+        stale: c.stale, rechecking: c.rechecking, error: c.recheck_error })) : []),
     ...R.risks.map(r => ({ ...r, source: "static" })),
   ];
   const order = { high: 0, medium: 1, low: 2 };
-  items.sort((a, b) => order[a.severity] - order[b.severity] || (a.source === "Claude" ? -1 : 1) - (b.source === "Claude" ? -1 : 1));
+  items.sort((a, b) => (a.verdict === "fixed") - (b.verdict === "fixed") || order[a.severity] - order[b.severity] || (a.source === "Claude" ? -1 : 1) - (b.source === "Claude" ? -1 : 1));
   return items;
 }
 function renderRisks() {
@@ -724,9 +737,19 @@ function renderRisks() {
         h("div", { class: "title" }, it.title),
         it.detail ? h("div", { class: "detail", html: rich(it.detail) }) : null);
       const meta = h("div", { class: "meta" }, h("span", { class: "sev " + it.severity }, it.severity), h("span", { class: "src" }, it.source));
+      if (it.verdict) meta.append(h("span", { class: "verdict " + it.verdict }, { fixed: "✓ fixed", still_present: "still there", partly_fixed: "partly fixed" }[it.verdict]));
+      else if (it.stale) meta.append(h("span", { class: "verdict stale", title: "The code this was found in has changed since" }, "code changed"));
+      if (it.verdict === "fixed") row.classList.add("fixed");
       const t = codeToggle(body, it.hunk_ids, "show code", { highlightLine: it.line });
       if (t) meta.append(t);
+      if (!STATIC) {
+        if (it.rechecking) meta.append(h("span", { class: "src", style: "display:inline-flex;gap:6px;align-items:center" }, h("span", { class: "spin" }), "re-checking…"));
+        else meta.append(h("button", { class: "toggle", title: it.source === "Claude" ? "Ask Claude whether this is still a problem in the current code (under a minute)" : "Re-run the static checks on the current code (a few seconds)",
+          onclick: () => it.source === "Claude" ? recheckConcern(it.cid) : refresh() }, "re-check"));
+      }
       body.append(meta);
+      if (it.note) body.append(h("div", { class: "recheck-note" }, (it.at ? `Re-checked ${it.at}: ` : "") + it.note));
+      if (it.error) body.append(h("div", { class: "recheck-note", style: "color:var(--high)" }, "Re-check failed: " + it.error));
       row.append(check(it.id, row), body, loc(it.file, it.line) || h("span"));
       card.append(row);
     }
@@ -740,7 +763,10 @@ function renderRisks() {
   const filters = h("div", { class: "filters" }, ["all", "high", "medium", "low"].filter(s => s === "all" || counts[s]).map(s =>
     h("button", { class: "btn" + (riskFilter === s ? " on" : ""), onclick: e => { riskFilter = s; [...filters.children].forEach(b => b.classList.remove("on")); e.target.classList.add("on"); draw(); } }, `${s} ${counts[s]}`)));
   draw();
-  return secEl("risks", "Risks", filters, list);
+  const resolved = (R.resolved || []).filter(inTopic);
+  const done = resolved.length ? h("div", { class: "card resolved" }, h("h4", {}, `✓ Resolved since last refresh · ${resolved.length}`),
+    h("ul", { style: "margin:0;padding-left:18px" }, resolved.map(r => h("li", {}, r.title, h("span", { class: "src" }, "  " + r.file))))) : null;
+  return secEl("risks", "Risks", done, filters, list);
 }
 
 function wordDiff(a, b) {
@@ -1239,24 +1265,45 @@ async function poll(untilChangedFrom) {
       await new Promise(res => setTimeout(res, 2500));
       const next = await fetchReport();
       const llmChanged = (next.llm || {}).status !== (R.llm || {}).status;
-      const idChanged = untilChangedFrom && next.id !== untilChangedFrom;
-      if (idChanged || llmChanged || (next._rebuilding === false && untilChangedFrom && next.id !== R.id)) {
+      const concernsChanged = JSON.stringify((next.llm || {}).concerns || []) !== JSON.stringify((R.llm || {}).concerns || []);
+      if (!llmChanged && !untilChangedFrom && concernsChanged) {
+        const was = Object.fromEntries(((R.llm || {}).concerns || []).map(c => [c.id, c]));
         R = next; render();
-        if (idChanged) toast("Report refreshed");
+        for (const c of (R.llm.concerns || [])) if (was[c.id]?.rechecking && !c.rechecking)
+          toast(c.recheck_error ? "Re-check failed" : c.verdict === "fixed" ? `Fixed: ${c.title}` : c.verdict === "partly_fixed" ? `Partly fixed: ${c.title}` : `Still there: ${c.title}`);
+      }
+      const idChanged = untilChangedFrom && next.id !== untilChangedFrom;
+      if (next.id !== R.id || llmChanged) {
+        const newReport = next.id !== R.id;
+        R = next; render();
+        if (newReport) toast((R.resolved || []).length ? `Report refreshed · ✓ ${plural(R.resolved.length, "risk")} resolved` : "Report refreshed");
         if ((R.llm || {}).status === "ok" && llmChanged) toast("Model pass finished");
       }
-      if ((R.llm || {}).status !== "running" && !next._rebuilding && (!untilChangedFrom || next.id !== untilChangedFrom)) break;
+      if ((R.llm || {}).status !== "running" && !((R.llm || {}).rechecking || []).length && !next._rebuilding && (!untilChangedFrom || next.id !== untilChangedFrom) && !refreshing) break;
     }
   } catch (e) { console.warn(e); }
   polling = false;
 }
 
+async function recheckConcern(cid) {
+  try {
+    const r = await fetch("/api/recheck", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: cid }) });
+    if (!r.ok) { toast("Couldn't start the re-check"); return; }
+    const c = (R.llm.concerns || []).find(c => c.id === cid); if (c) c.rechecking = true;
+    render(); toast("Re-checking against the current code…"); poll();
+  } catch { toast("Couldn't reach the glance server"); }
+}
+
+let refreshing = false;
 async function refresh() {
+  refreshing = true;
   const b = document.getElementById("refresh");
   if (b) { b.disabled = true; b.textContent = "Refreshing…"; }
   const before = R.id;
   try { await fetch("/api/refresh", { method: "POST" }); } catch {}
-  await poll(before);
+  if (polling) { for (let i = 0; i < 240 && R.id === before; i++) await new Promise(r => setTimeout(r, 500)); }   // the running watcher picks it up (2 min cap)
+  else await poll(before);
+  refreshing = false;
   const b2 = document.getElementById("refresh");
   if (b2) { b2.disabled = false; b2.textContent = "↻ Refresh"; }
 }

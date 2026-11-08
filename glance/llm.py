@@ -226,6 +226,113 @@ def ground(result: dict, valid: set[str], units: set[str] | None = None) -> tupl
     return result, dropped
 
 
+def attach_evidence(result: dict, report: dict) -> dict:
+    """Give each concern a stable id, its files, and the cited code, so it can be re-checked after edits."""
+    hunks = {h["id"]: (f["path"], h) for f in report["files"] for h in f["hunks"]}
+    for c in result.get("concerns") or []:
+        c["id"] = "c_" + hashlib.sha1(f"{c.get('title')}|{c.get('detail')}".encode()).hexdigest()[:10]
+        c["files"] = sorted({hunks[h][0] for h in c["hunks"] if h in hunks})
+        lines = []
+        for hid in c["hunks"][:4]:
+            path, h = hunks[hid]
+            lines.append(f"--- {path} @@ +{h['new_start']} @@")
+            lines += [f"{l[0]}{l[3]}" for l in h["lines"][:80]]
+        c["evidence"] = "\n".join(lines)[:12000]
+        c["fingerprint"] = {hid: _hunk_print(hunks[hid][1]) for hid in c["hunks"] if hid in hunks}
+    return result
+
+
+def _hunk_print(h: dict) -> str:
+    """Content fingerprint: hunk ids are positional (stable for citations), so edits inside a hunk keep its id."""
+    return hashlib.sha1(json.dumps([[l[0], l[3]] for l in h["lines"]]).encode()).hexdigest()[:12]
+
+
+def carry_over(old: dict, new: dict) -> dict:
+    """After a refresh: keep the previous model pass instead of paying for a new one. Prose still points at
+    hunks that exist; concerns whose cited code changed are marked stale so they can be re-checked one by one.
+    Story prose is moved onto the new unit ids by (chapter, name)."""
+    prev = old.get("llm") or {}
+    if prev.get("status") != "ok":
+        return {"status": "skipped", "reason": "not run"}
+    valid = {h["id"] for f in new["files"] for h in f["hunks"]}
+    prints = {h["id"]: _hunk_print(h) for f in new["files"] for h in f["hunks"]}
+    out = json.loads(json.dumps(prev))           # deep copy
+    for c in out.get("concerns") or []:
+        c.setdefault("id", "c_" + hashlib.sha1(f"{c.get('title')}|{c.get('detail')}".encode()).hexdigest()[:10])
+        if c.get("verdict") == "fixed":
+            continue
+        kept = [h for h in c.get("hunks") or [] if h in valid]
+        edited = any(prints.get(h) != fp for h, fp in (c.get("fingerprint") or {}).items())
+        if len(kept) < len(c.get("hunks") or []) or edited:
+            c["stale"] = True
+        c["hunks"] = kept
+    for key in ("business_logic", "walkthrough"):
+        out[key] = [dict(it, hunks=[h for h in it.get("hunks") or [] if h in valid]) for it in out.get(key) or []]
+        out[key] = [it for it in out[key] if it["hunks"]]
+    old_units = {u["id"]: (u["chapter"], u["name"]) for u in (old.get("story") or {}).get("units", [])}
+    new_ids = {(u["chapter"], u["name"]): u["id"] for u in (new.get("story") or {}).get("units", [])}
+    remap = {oid: new_ids[k] for oid, k in old_units.items() if k in new_ids}
+    st = out.get("story") or {}
+    if st:
+        st["units"] = {remap[k]: v for k, v in (st.get("units") or {}).items() if k in remap}
+        st["how_it_works"] = [dict(s2, units=[remap[u] for u in s2.get("units", []) if u in remap]) for s2 in st.get("how_it_works") or []]
+        st["how_it_works"] = [s2 for s2 in st["how_it_works"] if s2["units"]]
+    if old.get("intent") != new.get("intent"):
+        out["intent"] = None
+    out["carried"] = True
+    return out
+
+
+def resolved_since(old: dict, new: dict) -> list[dict]:
+    """Static risks that were in the previous report and aren't any more (matched on rule, file and title,
+    since line numbers move when you edit)."""
+    key = lambda r: (r["rule"], r["file"], r["title"])
+    now = {key(r) for r in new.get("risks", [])}
+    return [{"title": r["title"], "file": r["file"], "severity": r["severity"], "rule": r["rule"]}
+            for r in old.get("risks", []) if key(r) not in now]
+
+
+RECHECK = """A reviewer flagged a problem in a code change. The author has since edited the code. Decide whether the
+problem is still there, using the CURRENT code below (you may also Read/Grep files in the repo).
+
+Return ONLY JSON: {"verdict": "fixed" | "still_present" | "partly_fixed", "explanation": "1-2 plain sentences:
+what changed and why that does or doesn't resolve it", "hunks": ["h_..."]}
+"hunks" = ids from the CURRENT diff that matter for your answer (may be empty if fixed by removing code)."""
+
+
+def recheck(report: dict, concern: dict, provider: str = "auto", model: str | None = None, timeout: int = 240) -> dict:
+    """Targeted model call for one concern against the current diff: much smaller and faster than a full pass."""
+    prov = available_provider(provider)
+    if prov is None:
+        return {"error": "no `claude` CLI on PATH and no ANTHROPIC_API_KEY"}
+    files = set(concern.get("files") or [])
+    parts = [RECHECK, "", "## The problem as originally reported",
+             f"[{concern.get('severity')}] {concern.get('title')}", str(concern.get('detail') or ""), "",
+             "## Code it was found in (at the time)", concern.get("evidence") or "(not recorded)", "",
+             "## Current diff of those files (hunk ids in brackets)"]
+    for f in report["files"]:
+        if f["path"] in files or (not files):
+            parts.append(f"\n### {f['path']}")
+            for h in f["hunks"]:
+                parts.append(f"[{h['id']}] @@ -{h['old_start']},{h['old_len']} +{h['new_start']},{h['new_len']} @@ {h['header']}")
+                parts += [f"{l[0]}{l[3]}" for l in h["lines"][:300]]
+    missing = files - {f["path"] for f in report["files"]}
+    if missing:
+        parts.append(f"\n(These files no longer differ from the base branch: {', '.join(sorted(missing))})")
+    prompt = "\n".join(parts)[:DIFF_BUDGET]
+    try:
+        raw = _call_claude_cli(prompt, report["repo_path"], model, timeout) if prov == "claude-cli" else _call_anthropic(prompt, model or DEFAULT_MODEL, timeout)
+        data = _extract_json(raw)
+    except subprocess.TimeoutExpired:
+        return {"error": f"timed out after {timeout}s"}
+    except Exception as e:
+        return {"error": str(e)[:300]}
+    valid = {h["id"] for f in report["files"] for h in f["hunks"]}
+    verdict = data.get("verdict") if data.get("verdict") in ("fixed", "still_present", "partly_fixed") else "still_present"
+    return {"verdict": verdict, "explanation": str(data.get("explanation") or "")[:600],
+            "hunks": [h for h in data.get("hunks") or [] if h in valid]}
+
+
 def ground_story(story: Any, units: set[str]) -> dict:
     """Keep only prose tied to real story units: unknown unit ids and uncited flow steps are dropped."""
     if not isinstance(story, dict):
@@ -256,7 +363,7 @@ def run(report: dict, provider: str = "auto", model: str | None = None, timeout:
     cache = Path(report["repo_path"]) / ".glance" / "llm-cache" / (hashlib.sha256(f"{prov}|{model}|{prompt}".encode()).hexdigest()[:24] + ".json")
     if cache.is_file():
         try:
-            return {**json.loads(cache.read_text()), "cached": True}
+            return attach_evidence({**json.loads(cache.read_text()), "cached": True}, report)
         except (OSError, ValueError):
             pass
     try:
@@ -272,6 +379,7 @@ def run(report: dict, provider: str = "auto", model: str | None = None, timeout:
     if not report.get("intent"):
         data["intent"] = None          # the scope check only means something against a stated task
     data, dropped = ground(data, valid, {u["id"] for u in (report.get("story") or {}).get("units", [])})
+    attach_evidence(data, report)
     result = {"status": "ok", "provider": prov, "model": model or ("default" if prov == "claude-cli" else DEFAULT_MODEL),
               "prompt_chars": len(prompt), "dropped_ungrounded": dropped, **data}
     try:
