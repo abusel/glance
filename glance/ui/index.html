@@ -38,7 +38,7 @@ button { font: inherit; color: inherit; }
 /* ---------- top bar ---------- */
 .top { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--line); }
-.top-in { display: flex; align-items: center; gap: 14px; padding: 10px 20px; max-width: 1480px; margin: 0 auto; flex-wrap: wrap; }
+.top-in { display: flex; align-items: center; gap: 14px; padding: 10px 20px; max-width: none; margin: 0 auto; flex-wrap: wrap; }
 .brand { font-weight: 700; letter-spacing: -.02em; font-size: 16px; display: flex; align-items: center; gap: 7px; }
 .brand i { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); display: inline-block; box-shadow: 0 0 0 3px var(--accent-soft); }
 .ref { font-family: var(--mono); font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46ch; }
@@ -57,7 +57,7 @@ button { font: inherit; color: inherit; }
 .bar > span { display: block; height: 100%; background: var(--accent); width: 0; transition: width .25s; }
 
 /* ---------- layout ---------- */
-.wrap { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 28px; max-width: 1480px; margin: 0 auto; padding: 22px 20px 120px; }
+.wrap { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 28px; max-width: none; margin: 0 auto; padding: 22px 20px 120px; }
 nav.rail { position: sticky; top: 66px; align-self: start; max-height: calc(100vh - 80px); overflow: auto; font-size: 13px; }
 .rail h6 { margin: 18px 0 6px; font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
 .rail a.sec { display: flex; justify-content: space-between; align-items: center; padding: 5px 9px; border-radius: 6px; text-decoration: none; color: var(--ink-2); }
@@ -198,6 +198,14 @@ table.f tr.same td { color: var(--muted); }
 .diff tr.hh td { background: var(--panel-2); color: var(--muted); padding: 3px 10px; font-size: 11.5px; }
 .diff tr.hl td { box-shadow: inset 3px 0 0 var(--accent); }
 .diff td.c { width: 100%; }
+.row > .diff { grid-column: 1 / -1; margin: 8px -16px -11px; }
+.routes .r > .diff { grid-column: 1 / -1; margin: 6px -16px -9px; }
+.grid2 > .wide { grid-column: 1 / -1; }
+.diff td.n.go { cursor: pointer; }
+.diff td.n.go:hover { color: var(--accent); text-decoration: underline; }
+.ed { font-size: 11.5px; color: var(--accent); text-decoration: none; white-space: nowrap; cursor: pointer; }
+.ed:hover { text-decoration: underline; }
+.locwrap { display: flex; gap: 8px; align-items: baseline; justify-content: flex-end; min-width: 0; }
 .diff .fn { padding: 6px 12px; font-size: 12px; font-family: var(--mono); color: var(--muted); background: var(--panel-2); border-bottom: 1px solid var(--line-2); display: flex; justify-content: space-between; gap: 8px; }
 .callers { font-family: var(--mono); font-size: 12px; border-top: 1px solid var(--line-2); padding: 6px 14px 8px; }
 .callers div { padding: 2px 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -206,7 +214,7 @@ table.f tr.same td { color: var(--muted); }
 
 /* ---------- files ---------- */
 .fileblock { scroll-margin-top: 76px; }
-.fileblock .fh { display: grid; grid-template-columns: 22px 30px minmax(0, 1fr) auto; gap: 10px; padding: 10px 14px; align-items: center; cursor: pointer; }
+.fileblock .fh { display: grid; grid-template-columns: 22px 30px minmax(0, 1fr) auto auto; gap: 10px; padding: 10px 14px; align-items: center; cursor: pointer; }
 .fileblock .fh .rk { color: var(--faint); font-variant-numeric: tabular-nums; font-size: 12px; text-align: right; }
 .fileblock .fh .path { font-family: var(--mono); font-size: 13px; font-weight: 600; word-break: break-all; }
 .fileblock .fh .why { all: unset; font-size: 12px; color: var(--muted); display: block; }
@@ -229,7 +237,7 @@ table.f tr.same td { color: var(--muted); }
   .ref { max-width: 100%; order: 5; flex-basis: 100%; }
   .intent { grid-template-columns: 1fr; } .intent > div { border-left: 0; border-top: 1px solid var(--line-2); }
   .ba { grid-template-columns: 1fr; } .ba > div + div { border-left: 0; border-top: 1px solid var(--line-2); }
-  .routes .r { grid-template-columns: 22px 54px minmax(0, 1fr); } .routes .r > .loc { grid-column: 3; }
+  .routes .r { grid-template-columns: 22px 54px minmax(0, 1fr); } .routes .r > .locwrap { grid-column: 3; justify-content: flex-start; }
   .row { grid-template-columns: 22px minmax(0, 1fr); } .row > .loc { grid-column: 2; }
   .ops li { grid-template-columns: 1fr; gap: 0; }
   .hero .summary { font-size: 15px; }
@@ -273,6 +281,22 @@ function h(tag, attrs, ...kids) {
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const rich = s => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>");
 const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+// ------------------------------------------------------------------ open in editor
+function editorHref(path, line) { return `vscode://file${R.repo_path}/${path}${line ? ":" + line : ""}`; }
+async function openInEditor(path, line) {
+  if (!STATIC) {
+    try {
+      const r = await fetch("/api/open", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path, line }) });
+      if (r.ok) { toast(`Opened ${path.split("/").pop()}${line ? ":" + line : ""} in VS Code`); return; }
+      if (r.status === 404) { toast("That file isn't in the working tree"); return; }
+    } catch {}
+  }
+  location.href = editorHref(path, line);   // static report, or no `code` CLI: let the OS handle vscode://
+}
+function editorLink(path, line, label = "VS Code ↗") {
+  return h("a", { class: "ed", href: editorHref(path, line), title: `Open ${path}${line ? ":" + line : ""} in VS Code`,
+    onclick: e => { e.preventDefault(); e.stopPropagation(); openInEditor(path, line); } }, label);
+}
 function toast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.classList.add("on"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("on"), 1800); }
 
 function storeKey() { return `glance:${R.repo_path}:${R.base.rev}:${R.head.ref}`; }
@@ -320,14 +344,18 @@ function diffTable(hunkIds, opts = {}) {
   const files = Object.keys(byFile);
   if (!files.length) { wrap.append(h("div", { class: "empty", style: "padding:8px 12px" }, "No diff lines for this item.")); return wrap; }
   for (const f of files) {
-    if (opts.showFile !== false) wrap.append(h("div", { class: "fn" }, h("span", {}, f), h("a", { href: "#file-" + (FILES[f] || {}).rank, onclick: e => { e.preventDefault(); jumpFile(f); } }, "open file ↗")));
+    if (opts.showFile !== false) wrap.append(h("div", { class: "fn" }, h("span", {}, f), h("span", { class: "locwrap" }, h("a", { href: "#file-" + (FILES[f] || {}).rank, onclick: e => { e.preventDefault(); jumpFile(f); } }, "full diff"), editorLink(f, byFile[f][0]?.new_start))));
     const t = h("table");
     for (const hk of byFile[f].sort((a, b) => a.new_start - b.new_start)) {
       t.append(h("tr", { class: "hh" }, h("td", { colspan: 3 }, `@@ -${hk.old_start},${hk.old_len} +${hk.new_start},${hk.new_len} @@ ${hk.header || ""}`)));
+      let next = hk.new_start || 1;   // where a deleted line would sit in the current file
       for (const l of hk.lines) {
         const cls = l[0] === "+" ? "a" : l[0] === "-" ? "d" : "";
         const hl = opts.highlightLine && (l[2] === opts.highlightLine) ? " hl" : "";
-        t.append(h("tr", { class: cls + hl }, h("td", { class: "n" }, l[1] ?? ""), h("td", { class: "n" }, l[2] ?? ""), h("td", { class: "c" }, (l[0] === " " ? " " : l[0]) + l[3])));
+        const target = l[2] ?? next;
+        if (l[2] != null) next = l[2] + 1;
+        const go = { class: "n go", title: `Open in VS Code at line ${target}`, onclick: () => openInEditor(f, target) };
+        t.append(h("tr", { class: cls + hl }, h("td", go, l[1] ?? ""), h("td", go, l[2] ?? ""), h("td", { class: "c" }, (l[0] === " " ? " " : l[0]) + l[3])));
       }
     }
     wrap.append(t);
@@ -340,9 +368,12 @@ function codeToggle(container, hunkIds, label = "show code", opts = {}) {
   let open = null;
   const b = h("button", { class: "toggle" }, label);
   b.addEventListener("click", () => {
-    if (open) { open.remove(); open = null; b.textContent = label; return; }
+    const host = container.closest(".row, .routes .r") || container;   // span the whole row, not the middle column
+    const card = container.closest(".grid2 > .card");       // two-up cards go full width while code is open
+    if (open) { open.remove(); open = null; b.textContent = label; if (card && !card.querySelector(".diff")) card.classList.remove("wide"); return; }
     open = diffTable(hunkIds, opts);
-    container.append(open);
+    host.append(open);
+    if (card) card.classList.add("wide");
     b.textContent = "hide code";
   });
   return b;
@@ -357,7 +388,7 @@ function jumpFile(path) {
 
 function loc(file, line) {
   if (!file) return null;
-  return h("span", { class: "loc", title: "Jump to file diff", onclick: () => jumpFile(file) }, `${file}${line ? ":" + line : ""}`);
+  return h("span", { class: "locwrap" }, h("span", { class: "loc", title: "Jump to file diff", onclick: () => jumpFile(file) }, `${file}${line ? ":" + line : ""}`), editorLink(file, line, "↗"));
 }
 
 // ------------------------------------------------------------------ top bar + rail
@@ -759,7 +790,8 @@ function renderFiles() {
     fh.append(chk, h("span", { class: "rk" }, "#" + f.rank),
       h("div", {}, h("div", { class: "path" }, h("span", { class: "dot " + sev, style: "margin-right:8px;vertical-align:1px" }), f.path, h("span", { class: "cat" }, f.category), f.status !== "modified" ? h("span", { class: "cat" }, f.status) : null),
         h("span", { class: "why" }, f.reasons.join(" · "))),
-      h("span", { class: "stats" }, h("span", { class: "add" }, "+" + f.additions), " ", h("span", { class: "del" }, "−" + f.deletions)));
+      h("span", { class: "stats" }, h("span", { class: "add" }, "+" + f.additions), " ", h("span", { class: "del" }, "−" + f.deletions)),
+      f.status === "removed" ? h("span") : editorLink(f.path, f.hunks[0]?.new_start));
     fh.addEventListener("click", () => {
       if (card._open) { card._open.remove(); card._open = null; return; }
       if (!f.hunks.length) { card._open = h("div", { class: "more" }, f.binary ? "Binary file" : f.category === "lockfile" || f.category === "generated" ? "Diff hidden (" + f.category + ")" : "No textual diff"); }

@@ -199,3 +199,35 @@ def test_cli_json(tmp_path, capsys):
     report = json.loads(path.read_text())
     assert report["llm"]["status"] == "skipped"
     assert ".glance/" in (repo / ".git" / "info" / "exclude").read_text()
+
+
+def test_open_in_editor_endpoint(tmp_path, monkeypatch):
+    import http.client
+    import json as _json
+    import threading
+    from http.server import ThreadingHTTPServer
+
+    from glance.server import State, make_handler
+
+    (tmp_path / "a.py").write_text("x = 1\n")
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(State({"repo_path": str(tmp_path)})))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    port = srv.server_address[1]
+
+    def post(body, origin=None):
+        c = http.client.HTTPConnection("127.0.0.1", port)
+        headers = {"Content-Type": "application/json", "Host": f"127.0.0.1:{port}"}
+        if origin:
+            headers["Origin"] = origin
+        c.request("POST", "/api/open", _json.dumps(body), headers)
+        return c.getresponse().status
+
+    try:
+        monkeypatch.setenv("GLANCE_EDITOR", "definitely-not-an-editor-xyz")
+        assert post({"path": "../etc/passwd", "line": 1}) == 400
+        assert post({"path": "/etc/passwd", "line": 1}) == 400
+        assert post({"path": "missing.py"}) == 404
+        assert post({"path": "a.py", "line": 1}, origin="https://evil.example") == 403
+        assert post({"path": "a.py", "line": 1}) == 501          # valid request, no editor CLI
+    finally:
+        srv.shutdown()

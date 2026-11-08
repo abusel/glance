@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
@@ -72,8 +75,40 @@ def make_handler(state: State):
                 return self._send(200, json.dumps({"path": path, "side": side, "text": text}).encode())
             return self._send(404, b'{"error":"not found"}')
 
+        def _same_origin(self) -> bool:
+            # Browsers send Origin on cross-site POSTs; refuse anything that isn't this page.
+            origin = self.headers.get("Origin")
+            return origin is None or origin == f"http://{self.headers.get('Host', '')}"
+
+        def _open_in_editor(self):
+            if not self._same_origin():
+                return self._send(403, b'{"error":"cross-origin"}')
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                req = json.loads(self.rfile.read(min(n, 10_000)) or b"{}")
+                rel, line = str(req.get("path") or ""), max(1, int(req.get("line") or 1))
+            except (ValueError, TypeError):
+                return self._send(400, b'{"error":"bad request"}')
+            repo = Path(state.get()["repo_path"]).resolve()
+            fp = (repo / rel).resolve()
+            if not rel or repo not in fp.parents:
+                return self._send(400, b'{"error":"bad path"}')
+            if not fp.is_file():
+                return self._send(404, b'{"error":"file not in working tree"}')
+            editor = shutil.which(os.environ.get("GLANCE_EDITOR", "code"))
+            if not editor:
+                return self._send(501, b'{"error":"editor CLI not found"}')
+            try:
+                subprocess.Popen([editor, "-g", f"{fp}:{line}"], stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            except OSError as e:
+                return self._send(500, json.dumps({"error": str(e)}).encode())
+            return self._send(200, b'{"ok":true}')
+
         def do_POST(self):
             u = urlparse(self.path)
+            if u.path == "/api/open":
+                return self._open_in_editor()
             if u.path == "/api/refresh" and state.rebuild:
                 if state.rebuilding:
                     return self._send(409, b'{"error":"already refreshing"}')
