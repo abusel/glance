@@ -111,6 +111,21 @@ section.sec > h2::after { order: 2; }
 .backbtn.on { display: inline-flex; }
 .backbtn:hover { border-color: var(--accent); color: var(--accent); }
 
+/* ---------- triage ---------- */
+.readfirst .spot { display: grid; grid-template-columns: 22px 26px minmax(0, 1fr) auto; gap: 8px 10px; padding: 12px 18px; border-top: 1px solid var(--line-2); align-items: start; scroll-margin-top: 90px; }
+.readfirst .spot .n { color: var(--accent); font-weight: 700; font-variant-numeric: tabular-nums; }
+.readfirst .spot .why2 { font-size: 14px; color: var(--ink); }
+.readfirst .spot > .diff { grid-column: 1 / -1; margin: 4px -18px -12px; }
+.readfirst .spot.done:not(.peek) > .diff { display: none; }
+.readfirst .spot.done:not(.peek) .why2 { opacity: .55; }
+.readfirst .sub { padding: 0 18px 12px; color: var(--muted); font-size: 13px; }
+.readreason { font-size: 12.5px; color: var(--accent); margin-top: 3px; }
+.routine-bar { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 18px; border: 0; border-top: 1px solid var(--line-2); background: var(--panel-2); color: var(--muted); font-size: 13px; cursor: pointer; text-align: left; }
+.routine-bar:hover { color: var(--ink); }
+.routine-bar b { color: var(--add-ink); font-weight: 600; }
+.routine-list:not(.open) { display: none; }
+.chap-hd .cnts b { color: var(--ink); }
+
 /* ---------- re-check ---------- */
 .verdict { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; }
 .verdict.fixed { color: var(--add-ink); background: var(--add-bg); }
@@ -457,10 +472,12 @@ function storeKey() { return `glance:${R.repo_path}:${R.base.rev}:${R.head.ref}`
 function loadReviewed() { try { reviewed = JSON.parse(localStorage.getItem(storeKey()) || "{}") || {}; } catch { reviewed = {}; } }
 function saveReviewed() { try { localStorage.setItem(storeKey(), JSON.stringify(reviewed)); } catch {} updateProgress(); }
 
+let DEFAULTS = {};                 // id -> pre-checked? (routine items, low risks)
+function isChecked(id) { return id in reviewed ? !!reviewed[id] : !!DEFAULTS[id]; }
 function check(id, rowEl) {
-  const c = h("input", { type: "checkbox", class: "chk", title: "Mark reviewed (collapses it)" });
+  const c = h("input", { type: "checkbox", class: "chk", title: DEFAULTS[id] ? "Pre-checked as routine — untick to review it" : "Mark reviewed (collapses it)" });
   c.dataset.rid = id;
-  c.checked = !!reviewed[id];
+  c.checked = isChecked(id);
   c.addEventListener("click", e => e.stopPropagation());
   if (rowEl) {
     rowEl.dataset.rid = id;
@@ -471,7 +488,7 @@ function check(id, rowEl) {
     });
   }
   c.addEventListener("change", () => {
-    if (c.checked) reviewed[id] = 1; else delete reviewed[id];
+    reviewed[id] = c.checked ? 1 : 0;            // explicit either way, so an untick beats the routine default
     for (const el of document.querySelectorAll(`[data-rid="${CSS.escape(id)}"]`)) {
       if (el.tagName === "INPUT") el.checked = c.checked;
       else { el.classList.toggle("done", c.checked); el.classList.remove("peek"); }
@@ -498,16 +515,28 @@ function syncGroups(justFinished) {
   }
 }
 
+// The review path: read-first spots, every story item, every risk. Routine items and low risks start checked.
+function storyAI() { const l = R.llm || {}; return (l.status === "ok" && l.story) || {}; }
+function unitKey(u) { return `s:${u.chapter}:${u.name}`; }
+function attentionOf(u) {
+  const a = (storyAI().units || {})[u.id] || {};
+  return { level: a.attention || u.attention || "read", reason: (a.attention || "") === "read" ? (a.read_reason || u.attention_why) : (a.attention ? (a.read_reason || "") : u.attention_why), byAI: !!a.attention };
+}
+function spotKey(sp) { const u = ((R.story || {}).units || []).find(x => x.id === sp.unit); return `spot:${u ? u.chapter + ":" + u.name : sp.unit}:${sp.from}`; }
+function computeDefaults() {
+  DEFAULTS = {};
+  for (const u of (R.story || {}).units || []) DEFAULTS[unitKey(u)] = attentionOf(u).level === "routine";
+  for (const r of riskItems()) DEFAULTS[r.id] = r.severity === "low" || r.verdict === "fixed";
+}
 function reviewables() {
-  const ids = [];
-  R.risks.forEach(r => ids.push(r.id));
-  R.changes.filter(c => c.kind !== "function" || c.signature_changed || c.status !== "modified").forEach(c => ids.push(c.id));
-  R.files.forEach(f => ids.push("f:" + f.path));
-  return ids;
+  const ids = (storyAI().read_first || []).map(spotKey);
+  ((R.story || {}).units || []).forEach(u => ids.push(unitKey(u)));
+  riskItems().forEach(r => ids.push(r.id));
+  return [...new Set(ids)];
 }
 function updateProgress() {
   const ids = reviewables();
-  const done = ids.filter(i => reviewed[i]).length;
+  const done = ids.filter(isChecked).length;
   const el = document.getElementById("prog");
   if (!el) return;
   el.querySelector("span.t").textContent = `${done}/${ids.length} reviewed`;
@@ -697,7 +726,7 @@ function renderOverview() {
 
   const out = [card];
   out.push(h("div", { style: "height:10px" }), intentCard());
-  if (llm.status === "ok" && (llm.walkthrough || []).length) {
+  if (llm.status === "ok" && (llm.walkthrough || []).length && !((llm.story || {}).read_first || []).length) {
     const wc = h("div", { class: "card walk" });
     wc.append(h("div", { class: "asked" }, h("b", {}, "Read in this order")));
     for (const s of llm.walkthrough) {
@@ -1139,6 +1168,7 @@ function unitRow(u, ai) {
     h("div", {}, h("span", { class: "nm" }, u.name), " ", h("span", { class: "st " + u.status }, STATUS_WORD[u.status] || u.status), " ",
       h("span", { class: "fw" }, u.kind === "function" && u.chapter === "background" && u.detail.includes("steps") ? "workflow" : u.kind),
       u.used_by_routes ? h("span", { class: "tag-route", title: "Referenced by changed route/controller code" }, " used by routes") : null),
+    attentionOf(u).level === "read" && attentionOf(u).reason ? h("div", { class: "readreason" }, "Read: " + attentionOf(u).reason) : null,
     ai && ai.what ? h("div", { class: "what" }, ai.what) : null,
     ai && ai.why ? h("div", { class: "uwhy" }, ai.why) : null,
     u.detail ? h("div", { class: "det" }, u.detail) : null);
@@ -1185,6 +1215,8 @@ function renderStory() {
   }
   if (bar.childNodes.length) goal.append(bar);
   out.push(goal);
+  const rf = readFirstCard(ai, units);
+  if (rf) out.push(rf);
 
   // 2-6. chapters
   let n = 1;
@@ -1193,11 +1225,12 @@ function renderStory() {
     const us = ch.unit_ids.map(id => units[id]).filter(u => u && inTopic(u));
     if (!us.length) continue;
     n++;
-    const counts = ["added", "modified", "removed"].map(s => [s, us.filter(u => u.status === s).length]).filter(([, k]) => k);
+    const toRead = us.filter(u => attentionOf(u).level === "read");
+    const routine = us.filter(u => attentionOf(u).level !== "read");
     const card = h("div", { class: "card chap", id: "chap-" + ch.id });
     card.append(h("div", { class: "chap-hd" }, h("span", { class: "num" }, n),
       h("div", {}, h("h3", {}, ch.title), h("div", { class: "intro" }, (ai.chapters || {})[ch.id] || ch.blurb)),
-      h("span", { class: "cnts" }, counts.map(([s, k]) => `${k} ${STATUS_WORD[s].toLowerCase()}`).join(" · "))));
+      h("span", { class: "cnts" }, toRead.length ? h("b", {}, `${toRead.length} to read`) : "nothing to read", routine.length ? ` · ${routine.length} routine` : "")));
     const list = sub => {
       const kids = [];
       for (const s of ["added", "modified", "removed"]) {
@@ -1207,12 +1240,56 @@ function renderStory() {
       }
       return kids;
     };
-    if (ch.id === "supporting" && us.length > 8) card.append(...topicGroups("story-supporting", us, list, u => u.name));
-    else card.append(...list(us));
+    if (ch.id === "supporting" && toRead.length > 8) card.append(...topicGroups("story-supporting", toRead, list, u => u.name));
+    else card.append(...list(toRead));
+    if (routine.length) {
+      const key = "routine:" + ch.id;
+      const box = h("div", { class: "routine-list" + (groupOpen[key] ? " open" : "") }, ...list(routine));
+      const peek = routine.slice(0, 4).map(u => u.name).join(", ") + (routine.length > 4 ? ", …" : "");
+      const bar = h("button", { class: "routine-bar", onclick: () => { groupOpen[key] = box.classList.toggle("open"); bar.querySelector(".act").textContent = groupOpen[key] ? "hide" : "show"; } },
+        h("b", {}, `✓ ${routine.length} routine`), ` pre-checked · ${peek}`, h("span", { class: "spacer", style: "flex:1" }), h("span", { class: "act toggle" }, groupOpen[key] ? "hide" : "show"));
+      card.append(bar, box);
+    }
     out.push(card);
   }
   if ((st.test_files || []).length) out.push(h("div", { class: "more", style: "border:0;padding:10px 4px" }, `Plus ${plural(st.test_files.length, "test file")} — see Files.`));
   return secEl("story", "The change, step by step", ...out);
+}
+
+function spotDiff(sp) {
+  const x = HUNKS[sp.hunk];
+  const wrap = h("div", { class: "diff" });
+  if (!x) return wrap;
+  const t = h("table");
+  let next = x.hunk.new_start || 1;
+  for (const l of x.hunk.lines) {
+    const pos = l[2] ?? next;
+    if (l[2] != null) next = l[2] + 1;
+    if (pos < sp.from || pos > sp.to + (l[0] === "-" ? 1 : 0)) continue;
+    const cls = l[0] === "+" ? "a" : l[0] === "-" ? "d" : "";
+    const go = { class: "n go", title: `Open in VS Code at line ${pos}`, onclick: () => openInEditor(x.file, pos) };
+    t.append(h("tr", { class: cls }, h("td", go, l[1] ?? ""), h("td", go, l[2] ?? ""), h("td", { class: "c" }, (l[0] === " " ? " " : l[0]) + l[3])));
+  }
+  wrap.append(t);
+  return wrap;
+}
+function readFirstCard(ai, units) {
+  const spots = (ai.read_first || []).filter(sp => units[sp.unit] && inTopic(units[sp.unit]));
+  if (!spots.length) return null;
+  const lines = spots.reduce((n, sp) => n + (sp.to - sp.from + 1), 0);
+  const routine = ((R.story || {}).units || []).filter(u => attentionOf(u).level === "routine").length;
+  const card = h("div", { class: "card readfirst chap", id: "read-first" });
+  card.append(h("div", { class: "chap-hd" }, h("span", { class: "num" }, "★"),
+    h("div", {}, h("h3", {}, `Read these ${spots.length} spots`), h("div", { class: "intro" }, `About ${lines} lines. This is where the change does something custom; the ${routine} routine items below are pre-checked.`)), h("span")));
+  spots.forEach((sp, i) => {
+    const u = units[sp.unit];
+    const row = h("div", { class: "spot", id: "spot-" + i });
+    row.append(check(spotKey(sp), row), h("span", { class: "n" }, i + 1),
+      h("div", {}, h("div", { class: "why2" }, sp.why), h("div", { style: "margin-top:3px" }, h("span", { class: "chip", onclick: () => jumpUnit(u.id) }, u.name), h("span", { class: "src" }, `  lines ${sp.from}–${sp.to}`))),
+      editorLink(HUNKS[sp.hunk]?.file || u.file, sp.from, "VS Code ↗"), spotDiff(sp));
+    card.append(row);
+  });
+  return card;
 }
 
 // ------------------------------------------------------------------ boot
@@ -1225,6 +1302,11 @@ function render() {
   indexReport();
   loadReviewed();
   document.title = `glance · ${R.repo}`;
+  computeDefaults();
+  if (R.story && !render._collapsedOnce) {          // detail sections are reference: open them when you need them
+    for (const id of ["logic", "database", "schemas", "interfaces", "functions", "files"]) if (!(id in secCollapsed)) secCollapsed[id] = true;
+    render._collapsedOnce = true;
+  }
   renderTop();
   renderRail();
   const main = document.getElementById("main");

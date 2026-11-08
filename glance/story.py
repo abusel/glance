@@ -103,6 +103,65 @@ def _hunk_text(report: dict, paths: set[str]) -> str:
     return "\n".join(l[3] for f in report["files"] if f["path"] in paths for h in f["hunks"] for l in h["lines"] if l[0] != "-")
 
 
+def _churn(report: dict, cs: list[dict]) -> int:
+    """Changed lines inside these entities (not the whole hunk), the size of what a reviewer would read."""
+    files = {f["path"]: f for f in report["files"]}
+    n = 0
+    for c in cs:
+        e = c.get("after") or c.get("before") or {}
+        lo, hi = e.get("line", 0), e.get("end_line", 0) or 10**9
+        side = 2 if c.get("after") else 1
+        for f in [files.get(c["file"])] if files.get(c["file"]) else []:
+            for h in f["hunks"]:
+                if h["id"] in (c.get("hunk_ids") or []):
+                    n += sum(1 for l in h["lines"] if l[0] != " " and lo <= (l[side] if l[side] is not None else (l[3 - side] or 0)) <= hi) or 0
+    return n
+
+
+MONEY_OR_AUTH = re.compile(r"auth|permission|password|token|jwt|session|payment|billing|ledger|transfer|withdraw|deposit|"
+                           r"margin|loan|invoice|charge|fee|interest|price|amount|balance|journal|payout|refund|kyc|subscription", re.I)
+SMALL = 6        # changed lines: at or under this, an edit is usually mechanical
+
+
+def _attention(u: dict, cs: list[dict], risky_hunks: set[str]) -> tuple[str, str]:
+    """Default triage: 'read' (needs a human) or 'routine' (pre-checked; "by the way, this is done").
+    The model pass may override it with a reason."""
+    if risky_hunks & set(u["hunk_ids"]):
+        return "read", "a risk flag points here"
+    ch, st = u["chapter"], u["status"]
+    if ch == "database":
+        return "read", "changes what's stored"
+    if ch == "routes":
+        return "read", "changes an endpoint's behaviour" if st != "removed" else "an endpoint goes away"
+    if ch == "schemas":
+        if u.get("used_by_routes"):
+            return "read", "part of an API contract"
+        return "routine", "internal data shape"
+    if any(c.get("signature_changed") for c in cs) and st == "modified":
+        return "read", "signature changed"
+    if ch == "background":
+        if st == "added" and u["churn"] <= SMALL and u["kind"] != "task":
+            return "routine", f"small helper ({u['churn']} lines)"
+        if st == "added":
+            return "read", "new background work"
+        if u["churn"] <= SMALL:
+            return "routine", f"small edit ({u['churn']} lines)"
+        return "read", "background logic changed"
+    # supporting
+    if u["kind"] in ("config", "env"):
+        return "routine", "configuration or copy"
+    if u["file"].endswith((".tsx", ".jsx", ".vue", ".svelte", ".css", ".html")):
+        big_money_ui = MONEY_OR_AUTH.search(u["name"]) and u["churn"] > 40
+        return ("read", "large change to a money screen") if big_money_ui else ("routine", "UI")
+    if st == "removed":
+        return "routine", "removed helper"
+    if MONEY_OR_AUTH.search(u["name"]) and u["churn"] > SMALL:
+        return "read", "money/auth logic"
+    if u["churn"] <= SMALL:
+        return "routine", f"small edit ({u['churn']} lines)"
+    return "read" if st == "added" and u["churn"] > 40 else "routine", "sizeable new code" if st == "added" and u["churn"] > 40 else "supporting change"
+
+
 def build_story(report: dict[str, Any]) -> dict[str, Any]:
     files = {f["path"]: f for f in report["files"]}
     changes = [c for c in report["changes"] if not _is_test(c["file"], files)
@@ -137,6 +196,7 @@ def build_story(report: dict[str, Any]) -> dict[str, Any]:
     route_paths = {c["file"] for c in changes if c["kind"] == "route"} | {p for p in files if ROUTE_PATH.search(p) and not _is_test(p, files)}
     route_text = _hunk_text(report, route_paths)
 
+    risky_hunks = {h for r in report.get("risks", []) if r["severity"] in ("high", "medium") for h in r.get("hunk_ids") or []}
     units: list[dict] = []
     for (ch, _), cs in groups.items():
         cs.sort(key=lambda c: (c["name"].count("."), c["line"]))
@@ -156,6 +216,8 @@ def build_story(report: dict[str, Any]) -> dict[str, Any]:
             u["detail"] = "handler for " + ", ".join(u["serves"][:3]) + (" · " + _detail(head) if head.get("signature_changed") else "")
         if ch == "schemas":
             u["used_by_routes"] = bool(re.search(rf"\b{re.escape(name)}\b", route_text))
+        u["churn"] = _churn(report, cs)
+        u["attention"], u["attention_why"] = _attention(u, cs, risky_hunks)
         units.append(u)
 
     kind_order = {"table": 0, "type": 1, "model": 2, "migration": 3}

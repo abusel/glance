@@ -52,6 +52,15 @@ the words. For "story":
 - units: for EVERY unit id in the database, routes, schemas and background chapters (and the supporting ones
   that matter), {"what": what it is or does, one plain sentence; "why": why this change needs it, one sentence}.
   For a removed unit, say what it did and what replaces it (or that nothing does). Only use listed unit ids.
+- Triage, so a reviewer only reads what needs a human. Each unit lists a default ("read" or "routine").
+  In units, add "attention": "read" | "routine" and, for read, "read_reason": what is custom, subtle or risky
+  here. Routine = standard, mechanical or obvious (plumbing, renames, UI copy, simple CRUD, passing a value
+  through): the reviewer will see it pre-approved. Read = custom business logic, money math, state
+  transitions, concurrency/idempotency, auth, data migrations, anything a wrong line would cost money or data.
+  Be decisive: most units in a typical change are routine.
+- read_first: the 3-8 spots a human must actually read to approve this change, most important first. Each is
+  {"unit": "u..", "hunk": "h_..", "from": N, "to": M, "why": "one sentence"} where from/to are NEW-file line
+  numbers inside that hunk, at most 25 lines. Point at the decisive lines, not whole functions.
 
 Return ONLY a JSON object, no prose, matching:
 {
@@ -62,7 +71,8 @@ Return ONLY a JSON object, no prose, matching:
   "walkthrough": [{"step": "short sentence on what to read and why", "hunks": ["h_..."]}],
   "story": {"goal": "...", "how_it_works": [{"text": "...", "units": ["u1", "u4"]}],
             "chapters": {"database": "...", "routes": "...", "schemas": "...", "background": "...", "supporting": "..."},
-            "units": {"u1": {"what": "...", "why": "..."}}}
+            "units": {"u1": {"what": "...", "why": "...", "attention": "read|routine", "read_reason": "..."}},
+            "read_first": [{"unit": "u1", "hunk": "h_...", "from": 10, "to": 22, "why": "..."}]}
 }
 walkthrough = the 3-8 hunks to read, in order, to understand the change."""
 
@@ -124,7 +134,7 @@ def build_prompt(report: dict) -> str:
             for uid in ch["unit_ids"][:120]:
                 u = by_id[uid]
                 extra = " (used by a changed route)" if u.get("used_by_routes") else ""
-                parts.append(f"{uid} [{u['status']} {u['kind']}] {u['name']} — {u['detail'][:160]}{extra} ({u['file']}:{u['line']}) hunks: {','.join(u['hunk_ids'][:6])}")
+                parts.append(f"{uid} [{u['status']} {u['kind']}] {u['name']} — {u['detail'][:160]}{extra} ({u['file']}:{u['line']}, {u.get('churn', 0)} changed lines) default: {u.get('attention', 'read')} ({u.get('attention_why', '')}) hunks: {','.join(u['hunk_ids'][:6])}")
         if story.get("test_files"):
             parts.append(f"(plus {len(story['test_files'])} test files, not listed)")
         parts.append("")
@@ -190,7 +200,7 @@ def _call_anthropic(prompt: str, model: str, timeout: int) -> str:
     return "".join(getattr(b, "text", "") for b in msg.content)
 
 
-def ground(result: dict, valid: set[str], units: set[str] | None = None) -> tuple[dict, int]:
+def ground(result: dict, valid: set[str], units: set[str] | None = None, hunk_index: dict[str, dict] | None = None) -> tuple[dict, int]:
     dropped = 0
 
     def keep(items: list | None) -> list:
@@ -222,7 +232,7 @@ def ground(result: dict, valid: set[str], units: set[str] | None = None) -> tupl
     for c in result["concerns"]:
         if c.get("severity") not in ("high", "medium", "low"):
             c["severity"] = "medium"
-    result["story"] = ground_story(result.get("story"), units or set())
+    result["story"] = ground_story(result.get("story"), units or set(), hunk_index)
     return result, dropped
 
 
@@ -277,6 +287,8 @@ def carry_over(old: dict, new: dict) -> dict:
         st["units"] = {remap[k]: v for k, v in (st.get("units") or {}).items() if k in remap}
         st["how_it_works"] = [dict(s2, units=[remap[u] for u in s2.get("units", []) if u in remap]) for s2 in st.get("how_it_works") or []]
         st["how_it_works"] = [s2 for s2 in st["how_it_works"] if s2["units"]]
+        st["read_first"] = [dict(sp, unit=remap[sp["unit"]]) for sp in st.get("read_first") or []
+                            if sp.get("unit") in remap and sp.get("hunk") in valid]
     if old.get("intent") != new.get("intent"):
         out["intent"] = None
     out["carried"] = True
@@ -333,7 +345,7 @@ def recheck(report: dict, concern: dict, provider: str = "auto", model: str | No
             "hunks": [h for h in data.get("hunks") or [] if h in valid]}
 
 
-def ground_story(story: Any, units: set[str]) -> dict:
+def ground_story(story: Any, units: set[str], hunks: dict[str, dict] | None = None) -> dict:
     """Keep only prose tied to real story units: unknown unit ids and uncited flow steps are dropped."""
     if not isinstance(story, dict):
         return {}
@@ -348,7 +360,29 @@ def ground_story(story: Any, units: set[str]) -> dict:
     chapters = story.get("chapters") if isinstance(story.get("chapters"), dict) else {}
     out["chapters"] = {k: str(v) for k, v in chapters.items() if k in ("database", "routes", "schemas", "background", "supporting") and v}
     us = story.get("units") if isinstance(story.get("units"), dict) else {}
-    out["units"] = {k: {"what": str(v.get("what") or ""), "why": str(v.get("why") or "")} for k, v in us.items() if k in units and isinstance(v, dict)}
+    out["units"] = {}
+    for k, v in us.items():
+        if k in units and isinstance(v, dict):
+            out["units"][k] = {"what": str(v.get("what") or ""), "why": str(v.get("why") or "")}
+            if v.get("attention") in ("read", "routine"):
+                out["units"][k]["attention"] = v["attention"]
+                out["units"][k]["read_reason"] = str(v.get("read_reason") or "")[:300]
+    spots = []
+    for sp in story.get("read_first") or []:
+        if not isinstance(sp, dict) or sp.get("unit") not in units or (hunks is not None and sp.get("hunk") not in hunks):
+            continue
+        try:
+            a, b = int(sp.get("from") or 0), int(sp.get("to") or 0)
+        except (TypeError, ValueError):
+            a = b = 0
+        if hunks is not None:
+            h = hunks[sp["hunk"]]
+            lo, hi = h["new_start"], h["new_start"] + max(h["new_len"], 1) - 1
+            a, b = (max(lo, min(a, hi)), max(lo, min(b, hi))) if a and b else (lo, min(hi, lo + 24))
+            a, b = min(a, b), max(a, b)
+            b = min(b, a + 39)
+        spots.append({"unit": sp["unit"], "hunk": sp.get("hunk"), "from": a, "to": b, "why": str(sp.get("why") or "")[:300]})
+    out["read_first"] = spots[:8]
     return out
 
 
@@ -378,7 +412,8 @@ def run(report: dict, provider: str = "auto", model: str | None = None, timeout:
         return {"status": "error", "provider": prov, "error": str(e)[:500]}
     if not report.get("intent"):
         data["intent"] = None          # the scope check only means something against a stated task
-    data, dropped = ground(data, valid, {u["id"] for u in (report.get("story") or {}).get("units", [])})
+    data, dropped = ground(data, valid, {u["id"] for u in (report.get("story") or {}).get("units", [])},
+                           {h["id"]: h for f in report["files"] for h in f["hunks"]})
     attach_evidence(data, report)
     result = {"status": "ok", "provider": prov, "model": model or ("default" if prov == "claude-cli" else DEFAULT_MODEL),
               "prompt_chars": len(prompt), "dropped_ungrounded": dropped, **data}

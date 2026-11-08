@@ -428,3 +428,26 @@ def test_alert_catch_env_flags_and_renames(tmp_path):
     assert env == {"New feature flag: NEW_FLAG": "low", "New env var: NEW_REQUIRED_KEY (required)": "medium"}
     assert "removed-still-used" not in {r["rule"] for r in rep["risks"]}
     assert "sensitive-area" not in {r["rule"] for r in rep["risks"]}
+
+
+def test_read_first_and_triage_grounding():
+    from glance.llm import ground_story
+
+    hunks = {"h_a": {"new_start": 10, "new_len": 30}}
+    out = ground_story({
+        "units": {"u1": {"what": "w", "why": "y", "attention": "routine", "read_reason": ""},
+                  "u2": {"what": "w", "why": "y", "attention": "maybe"}},
+        "read_first": [
+            {"unit": "u1", "hunk": "h_a", "from": 12, "to": 18, "why": "money math"},
+            {"unit": "u1", "hunk": "h_a", "from": 1, "to": 500, "why": "clamped"},
+            {"unit": "u1", "hunk": "h_zzz", "from": 1, "to": 2, "why": "unknown hunk"},
+            {"unit": "u9", "hunk": "h_a", "from": 12, "to": 13, "why": "unknown unit"}],
+    }, {"u1", "u2"}, hunks)
+    assert out["units"]["u1"]["attention"] == "routine" and "attention" not in out["units"]["u2"]
+    assert [(s["from"], s["to"]) for s in out["read_first"]] == [(12, 18), (10, 39)]
+
+
+def test_story_triage_defaults(py_report):
+    units = py_report["story"]["units"]
+    assert all(u["attention"] in ("read", "routine") and u["attention_why"] for u in units)
+    assert all(u["attention"] == "read" for u in units if u["chapter"] in ("database", "routes"))
