@@ -227,7 +227,8 @@ table.f tr.same td { color: var(--muted); }
 .diff tr.hh td { background: var(--panel-2); color: var(--muted); padding: 3px 10px; font-size: 11.5px; }
 .diff tr.hl td { box-shadow: inset 3px 0 0 var(--accent); }
 .diff td.c { width: 100%; }
-.row > .diff { grid-column: 1 / -1; margin: 8px -16px -11px; }
+.row > .diff, .constrow > .diff { grid-column: 1 / -1; margin: 8px -16px -11px; }
+.walk .step > .diff { grid-column: 1 / -1; margin: 6px -18px 0 -10px; }
 .routes .r > .diff { grid-column: 1 / -1; margin: 6px -16px -9px; }
 .grid2 > .wide { grid-column: 1 / -1; }
 .diff td.n.go { cursor: pointer; }
@@ -459,7 +460,7 @@ function codeToggle(container, hunkIds, label = "show code", opts = {}) {
   let open = null;
   const b = h("button", { class: "toggle" }, label);
   b.addEventListener("click", () => {
-    const host = container.closest(".row, .routes .r") || container;   // span the whole row, not the middle column
+    const host = container.closest(".row, .constrow, .routes .r, .walk .step") || container;   // span the whole row, not the middle column
     const card = container.closest(".grid2 > .card");       // two-up cards go full width while code is open
     if (open) { open.remove(); open = null; b.textContent = label; if (card && !card.querySelector(".diff")) card.classList.remove("wide"); return; }
     open = diffTable(hunkIds, opts);
