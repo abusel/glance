@@ -257,6 +257,27 @@ def _is_untracked(repo: Path, path: str) -> bool:
     return subprocess.run(["git", "ls-files", "--error-unmatch", "--", path], cwd=repo, capture_output=True).returncode != 0
 
 
+def grep_words(repo: Path, words: list[str], rev: str | None = None) -> list[tuple[str, int, str]]:
+    """Whole-word occurrences of any of `words` in the head tree (working tree when rev is None), one git call."""
+    args = ["grep", "-n", "-w", "-I", "--no-color"]
+    for w in words:
+        args += ["-e", w]
+    if rev:
+        args.append(rev)
+    args += ["--", ".", ":!*.lock", ":!package-lock.json", ":!*.min.js", ":!dist", ":!build"]
+    if rev is None:
+        args.insert(1, "--untracked")
+    out = git(repo, *args, check=False)
+    hits = []
+    for line in out.splitlines():
+        if rev and line.startswith(rev + ":"):
+            line = line[len(rev) + 1:]
+        parts = line.split(":", 2)
+        if len(parts) == 3 and parts[1].isdigit():
+            hits.append((parts[0], int(parts[1]), parts[2].strip()[:200]))
+    return hits
+
+
 def grep_word(repo: Path, word: str, rev: str | None = None, limit: int = 40) -> list[tuple[str, int, str]]:
     """Find whole-word occurrences in the head tree (working tree when rev is None)."""
     args = ["grep", "-n", "-w", "-I", "--no-color", "-e", word]

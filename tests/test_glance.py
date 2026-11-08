@@ -369,3 +369,62 @@ def test_refresh_carries_ai_and_tracks_resolved(py_report):
     assert carried["carried"] and set(carried["story"]["units"]) == {new["story"]["units"][0]["id"]}
     assert [r["title"] for r in resolved_since(old, new)] == [gone["title"]]
     assert carry_over({"llm": {"status": "skipped"}}, new)["status"] == "skipped"
+
+
+def _ts_repo(tmp_path, base_files: dict, branch_files: dict):
+    import subprocess
+
+    run = lambda *a: subprocess.run(a, cwd=tmp_path, check=True, capture_output=True)
+    run("git", "init", "-q", "-b", "main")
+    for p, t in base_files.items():
+        (tmp_path / p).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / p).write_text(t)
+    run("git", "add", "-A"); run("git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base")
+    run("git", "checkout", "-q", "-b", "feature")
+    for p, t in branch_files.items():
+        (tmp_path / p).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / p).write_text(t)
+    from glance.analyze import analyze
+    from glance.git import collect
+
+    return analyze(collect(tmp_path, base="main"))
+
+
+def test_house_style_suppresses_style_rules_not_security(tmp_path):
+    convention = {f"src/m{i}.ts": "\n".join(f"export const f{i}_{j} = (amount: number) => amount.toFixed(2)" for j in range(4)) + "\n" for i in range(3)}
+    new = {"src/fee.ts": 'export function fee(amount: number) {\n  return amount.toFixed(2)\n}\nconst q = db.$queryRawUnsafe(`SELECT ${x}`)\n'}
+    rep = _ts_repo(tmp_path, convention, new)
+    rules = {r["rule"] for r in rep["risks"]}
+    assert "money-float" not in rules and "unsafe-raw" in rules          # style skipped, security kept
+    assert rep["suppressed"][0]["rule"] == "money-float" and rep["suppressed"][0]["existing"] >= 8
+
+
+def test_style_rule_fires_without_convention(tmp_path):
+    rep = _ts_repo(tmp_path, {"src/a.ts": "export const a = 1\n"}, {"src/fee.ts": "export function fee(amount: number) {\n  return amount.toFixed(2)\n}\n"})
+    assert "money-float" in {r["rule"] for r in rep["risks"]} and rep["suppressed"] == []
+
+
+def test_alert_catch_env_flags_and_renames(tmp_path):
+    base = {"src/util.ts": "export function oldHelper(x: number) {\n  return x + 1\n}\n",
+            "src/use.ts": "import { oldHelper } from './util'\nexport const y = oldHelper(1)\n"}
+    branch = {
+        "src/jobs.ts": "\n".join([
+            "export async function run() {",
+            "  EmailClient.sendAlert({",
+            "    title: 'x',",
+            "  }).catch(() => {})",
+            "  fetchThings().catch(() => {})",
+            "  if (process.env.NEW_FLAG === 'true') return",
+            "  const key = process.env.NEW_REQUIRED_KEY",
+            "}", ""]),
+        "src/jobs.test.ts": "process.env.ONLY_IN_TESTS = 'x'\n",
+        # oldHelper moves to a class getter of the same name: refs now point at the live one
+        "src/util.ts": "export class Util {\n  static get oldHelper() {\n    return 1\n  }\n}\n",
+    }
+    rep = _ts_repo(tmp_path, base, branch)
+    sw = [r for r in rep["risks"] if r["rule"] == "swallowed"]
+    assert len(sw) == 1 and sw[0]["line"] == 5                           # fetchThings() flagged, sendAlert() not
+    env = {r["title"]: r["severity"] for r in rep["risks"] if r["rule"] == "new-env"}
+    assert env == {"New feature flag: NEW_FLAG": "low", "New env var: NEW_REQUIRED_KEY (required)": "medium"}
+    assert "removed-still-used" not in {r["rule"] for r in rep["risks"]}
+    assert "sensitive-area" not in {r["rule"] for r in rep["risks"]}

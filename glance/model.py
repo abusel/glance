@@ -106,6 +106,8 @@ class EntityChange:
     meta_changes: list[dict[str, Any]] = field(default_factory=list)
     hunk_ids: list[str] = field(default_factory=list)
     callers: list[dict[str, Any]] = field(default_factory=list)
+    callers_checked: bool = False      # False = never looked up (generic/short name): "no callers" means unknown
+    still_defined: bool = False        # a removed name that's still defined elsewhere (a rename/move/twin)
     line: int = 0
 
     @property

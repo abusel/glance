@@ -24,6 +24,13 @@ SENSITIVE_PATH_RE = re.compile(r"auth|permission|password|token|jwt|session|paym
 MONEY_WORD = r"(amount|price|balance|interest|fee|principal|margin|loan|payment|cents|equity|collateral|apr|apy|pnl|notional|payout|refund|cost|total|subtotal|tax|rate|leverage|nav)"
 BUSINESS_CONST_RE = re.compile(r"LIMIT|MAX|MIN|RATE|FEE|THRESHOLD|LEVERAGE|TIMEOUT|RETR|PCT|PERCENT|RATIO|APR|APY|TTL|EXPIR|WINDOW|QUOTA|CAP|FLOOR|SPREAD|MARGIN", re.I)
 PLACEHOLDER_RE = re.compile(r"changeme|example|xxx|dummy|placeholder|your[-_]|test|fake|sample|<|\$\{|\{\{|process\.env|os\.environ|getenv", re.I)
+# Style rules (not security rules) are skipped when the pattern is already established in the codebase.
+HOUSE_STYLE_RULES = {"money-float", "debug", "swallowed", "suppression", "localhost"}
+HOUSE_STYLE_MIN_USES, HOUSE_STYLE_MIN_FILES = 8, 3
+# `.catch(() => {})` on these is deliberate fire-and-forget, not a lost error.
+FIRE_AND_FORGET_RE = re.compile(r"\b(\w*(alert|notify|notification|email|mail|log|logger|track|capture|analytics|telemetry|metric|report|sentry|posthog|beacon)\w*)\s*[.(]", re.I)
+DOC_PATH_RE = re.compile(r"\.(md|mdx|rst|txt|adoc)$|(^|/)(docs?|CHANGELOG)", re.I)
+SWALLOW_PROMISE_RE = re.compile(r"\.catch\(\s*\(\)\s*=>\s*(\{\s*\}|null|undefined)\s*\)")
 ORM_FRAMEWORKS = {"sqlalchemy", "sqlmodel", "prisma", "drizzle", "typeorm", "mongoose"}
 
 
@@ -35,9 +42,50 @@ class Context:
     old_entities: dict[str, list[Entity]]
     tracked_files: list[str]
     parse_failures: list[tuple[FileChange, str]] = field(default_factory=list)
+    suppressed: dict[str, dict] = field(default_factory=dict)        # rule -> {title, existing, files, would_flag}
+    _style: dict[tuple[str, str], tuple[int, int]] = field(default_factory=dict)
 
     def file(self, path: str) -> FileChange | None:
         return next((f for f in self.cs.files if f.path == path), None)
+
+    def existing_uses(self, rule: str, pat: re.Pattern, lang: str) -> tuple[int, int]:
+        """How often `pat` already appears in the code as it was BEFORE this change (unchanged files from disk,
+        changed files from their old text): (matching lines, files). Cached per rule+language."""
+        key = (rule, lang)
+        if key in self._style:
+            return self._style[key]
+        changed = {f.path: f for f in self.cs.files}
+        exts = {"typescript": (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"), "python": (".py",)}.get(lang, ())
+        hits = files = budget = 0
+        for path in self.tracked_files:
+            if not path.endswith(exts) or re.search(r"(^|/)(node_modules|dist|build|vendor|generated|__generated__)/", path):
+                continue
+            if re.search(r"(^|/)(__tests__|tests?|__mocks__)/|\.(test|spec)\.", path):
+                continue                                    # house style = what production code does
+            fc = changed.get(path)
+            try:
+                text = fc.old_text if fc is not None else (self.cs.repo / path).read_text(errors="replace")
+            except OSError:
+                continue
+            if not text or len(text) > 400_000:
+                continue
+            budget += len(text)
+            n = sum(1 for line in text.splitlines() if pat.search(line) and not is_comment(lang, line))
+            if n:
+                hits, files = hits + n, files + 1
+            if budget > 40_000_000:
+                break
+        self._style[key] = (hits, files)
+        return hits, files
+
+    def house_style(self, rule: str, title: str, pat: re.Pattern, lang: str) -> bool:
+        """A style rule says nothing when the codebase already does this all over: that's convention, not risk."""
+        hits, files = self.existing_uses(rule, pat, lang)
+        if hits >= HOUSE_STYLE_MIN_USES and files >= HOUSE_STYLE_MIN_FILES:
+            s = self.suppressed.setdefault(rule, {"rule": rule, "title": title, "existing": hits, "files": files, "would_flag": 0})
+            s["would_flag"] += 1
+            return True
+        return False
 
 
 def _flag(rule: str, sev: str, title: str, detail: str, fc_path: str = "", line: int = 0, hunks: list[str] | None = None) -> RiskFlag:
@@ -132,6 +180,8 @@ def line_rules(ctx: Context) -> Iterator[RiskFlag]:
                     continue
                 if rule == "money-float" and re.search(r"(?i)\brate[_-]?limit", text):
                     continue
+                if rule in HOUSE_STYLE_RULES and ctx.house_style(rule, title, pat, fc.lang):
+                    continue
                 counts[rule] += 1
                 if counts[rule] <= 3:
                     yield _flag(rule, sev, title, f"{detail}\n`{text.strip()[:160]}`", fc.path, ln, [hid])
@@ -139,10 +189,30 @@ def line_rules(ctx: Context) -> Iterator[RiskFlag]:
             if n > 3:
                 meta = next(r for r in LINE_RULES if r[0] == rule)
                 yield _flag(rule, meta[1], f"{meta[2]} (+{n - 3} more)", f"{n} occurrences in this file.", fc.path, 0, [])
-        yield from swallowed_exceptions(fc)
+        yield from swallowed_exceptions(fc, ctx)
 
 
-def swallowed_exceptions(fc: FileChange) -> Iterator[RiskFlag]:
+def _statement_start(lines: list[str], i: int) -> str:
+    """The few lines leading up to line i, so a `}).catch(() => {})` can be traced back to its call."""
+    return " ".join(l.strip() for l in lines[max(0, i - 8):i + 1])
+
+
+def _caught_callee(text: str) -> str | None:
+    """For `...foo.bar(args).catch(() => {})`, return `foo.bar`: walk back from `.catch` over balanced parens."""
+    end = text.rfind(".catch(")
+    if end <= 0 or text[end - 1] != ")":
+        return None
+    depth, j = 0, end - 1
+    while j >= 0:
+        depth += {")": 1, "(": -1}.get(text[j], 0)
+        if depth == 0:
+            break
+        j -= 1
+    m = re.search(r"([\w$.]+)\s*$", text[:j]) if j > 0 else None
+    return m.group(1) if m else None
+
+
+def swallowed_exceptions(fc: FileChange, ctx: "Context | None" = None) -> Iterator[RiskFlag]:
     if fc.lang not in ("python", "typescript") or fc.category != "source" or not fc.new_text:
         return
     lines = fc.new_text.splitlines()
@@ -167,7 +237,12 @@ def swallowed_exceptions(fc: FileChange) -> Iterator[RiskFlag]:
                     yield _flag("swallowed", "medium", "Empty catch block", "Errors disappear silently here.", fc.path, ln, [hid])
                 elif only_log:
                     yield _flag("swallowed", "low", "Catch only logs", "Error is logged and execution continues as if it succeeded.", fc.path, ln, [hid])
-            if re.search(r"\.catch\(\s*\(\)\s*=>\s*(\{\s*\}|null|undefined)\s*\)", cur):
+            if SWALLOW_PROMISE_RE.search(cur):
+                callee = _caught_callee(_statement_start(lines, i))
+                if callee and FIRE_AND_FORGET_RE.search(callee + "("):
+                    continue                     # e.g. EmailClient.sendAlert(...).catch(() => {}): best-effort by design
+                if ctx is not None and ctx.house_style("swallowed", "Promise rejection swallowed", SWALLOW_PROMISE_RE, fc.lang):
+                    continue
                 yield _flag("swallowed", "medium", "Promise rejection swallowed", "`.catch(() => {})` hides failures.", fc.path, ln, [hid])
 
 
@@ -354,9 +429,10 @@ def function_rules(ctx: Context) -> Iterator[RiskFlag]:
         if c.kind != "function":
             continue
         outside = [x for x in c.callers if not x["in_diff"]]
-        if c.status == "removed" and c.callers:
+        code_refs = [x for x in c.callers if not DOC_PATH_RE.search(x["file"])]
+        if c.status == "removed" and code_refs and not c.still_defined:
             yield _flag("removed-still-used", "high", f"Removed {c.name}() is still referenced",
-                        f"{len(c.callers)} reference(s), e.g. {c.callers[0]['file']}:{c.callers[0]['line']}", c.file, c.line, c.hunk_ids)
+                        f"{len(code_refs)} reference(s), e.g. {code_refs[0]['file']}:{code_refs[0]['line']}", c.file, c.line, c.hunk_ids)
         elif c.status in ("modified", "moved") and c.signature_changed and outside:
             yield _flag("signature-blast-radius", "medium", f"{c.name}() signature changed; {len(outside)} call site(s) not in this diff",
                         f"e.g. {outside[0]['file']}:{outside[0]['line']}. Check they still pass the right arguments.", c.file, c.line, c.hunk_ids)
@@ -366,7 +442,7 @@ def function_rules(ctx: Context) -> Iterator[RiskFlag]:
             lines = (a.get("meta") or {}).get("lines", 0)
             if lines > 80:
                 yield _flag("long-function", "low", f"New {lines}-line function: {c.name}", "Long AI-written functions hide logic. Consider splitting.", c.file, c.line, c.hunk_ids)
-            if not c.callers and not short.startswith(("_", "test", "Test")) and short not in ("main", "handler", "default") \
+            if c.callers_checked and not c.callers and not short.startswith(("_", "test", "Test")) and short not in ("main", "handler", "default") \
                     and not short[:1].isupper() and not _is_framework_hook(ctx, c) and ctx.file(c.file) and ctx.file(c.file).category == "source":
                 yield _flag("unused", "low", f"New function {c.name}() isn't referenced anywhere",
                             "Dead code or a missing call site.", c.file, c.line, c.hunk_ids)
@@ -407,6 +483,7 @@ def test_rules(ctx: Context) -> Iterator[RiskFlag]:
 
 
 def config_rules(ctx: Context) -> Iterator[RiskFlag]:
+    seen_env: set[str] = set()
     for c in ctx.changes:
         if c.kind == "config" and c.status == "modified" and c.framework == "constant" and BUSINESS_CONST_RE.search(c.name):
             b = (c.before or {}).get("signature", "")
@@ -417,10 +494,19 @@ def config_rules(ctx: Context) -> Iterator[RiskFlag]:
             yield _flag("prompt-changed", "low", f"LLM prompt/agent changed: {c.name}",
                         "Prompt changes alter behavior without changing code paths. Re-run evals if you have them.", c.file, c.line, c.hunk_ids)
         elif c.kind == "env" and c.status == "added":
-            required = ((c.after or {}).get("fields") or {}).get("default") == "(required)"
-            yield _flag("new-env", "medium" if required else "low", f"New env var: {c.name}" + (" (required)" if required else ""),
-                        "Must be set in every environment (local, CI, staging, prod) before deploy." if required else "Has a fallback default.",
-                        c.file, c.line, c.hunk_ids)
+            fc = ctx.file(c.file)
+            if (fc and fc.category == "test") or c.name in seen_env:
+                continue
+            seen_env.add(c.name)
+            default = ((c.after or {}).get("fields") or {}).get("default") or ""
+            required = default == "(required)"
+            if default.startswith("flag:"):
+                title, detail = f"New feature flag: {c.name}", f"{default[5:].strip().capitalize()}. Decide its value per environment before deploy."
+            elif required:
+                title, detail = f"New env var: {c.name} (required)", "Must be set in every environment (local, CI, staging, prod) before deploy."
+            else:
+                title, detail = f"New env var: {c.name}", "Has a fallback default."
+            yield _flag("new-env", "medium" if required else "low", title, detail, c.file, c.line, c.hunk_ids)
         elif c.kind == "dependency" and c.status == "added":
             yield _flag("new-dependency", "low", f"New dependency: {c.name} {((c.after or {}).get('signature') or '')}",
                         "Check it's maintained, licensed appropriately and actually needed.", c.file, c.line, c.hunk_ids)
@@ -452,8 +538,10 @@ def parse_rules(ctx: Context) -> Iterator[RiskFlag]:
         yield _flag("parse-error", "high", f"File doesn't parse: {fc.path}", err, fc.path, 0, [h.id for h in fc.hunks][:2])
 
 
+# sensitive_rules is not run: "touches money code" is true of most files in a fintech repo, so as a flag it was
+# pure noise. The same signal now raises the file in the reading order (analyze.file_rank).
 RULES = [parse_rules, line_rules, migration_rules, schema_drift, api_rules, model_rules, task_rules, function_rules,
-         test_rules, config_rules, sensitive_rules]
+         test_rules, config_rules]
 
 
 def run_all(ctx: Context) -> list[RiskFlag]:

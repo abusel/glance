@@ -11,7 +11,7 @@ from .story import build_story
 from .topics import assign_topics
 from . import risk
 from .extractors import ExtractError, extract
-from .git import ChangeSet, git, grep_word
+from .git import ChangeSet, git, grep_word, grep_words
 from .model import Entity, EntityChange, FileChange, RiskFlag, short_hash
 
 # Meta keys whose change makes an entity "modified" even when fields/signature match.
@@ -140,36 +140,59 @@ def pair_moves(changes: list[EntityChange]) -> list[EntityChange]:
     return [c for c in out if not (c.status == "removed" and id(c) in consumed)]
 
 
+DEF_PATTERNS = [
+    r"^\s*(export\s+)?(default\s+)?(async\s+)?(function\*?|def|class)\s+{n}\b",
+    r"^\s*(export\s+)?(const|let|var)\s+{n}\b",
+    r"^\s*(?:(?:public|private|protected|static|async|get|set|readonly|override)\s+)+\*?{n}\s*[(<]",
+    r"^\s*{n}\s*\([^)]*\)\s*(:\s*[^{{=]+)?\{{\s*$",
+    r"^\s*{n}\s*[:=]\s*(async\s+)?(function\b|\([^)]*\)\s*(:\s*[^=]+)?=>)",
+]
+
+
+def _is_definition(name: str, text: str) -> bool:
+    return any(re.match(p.format(n=re.escape(name)), text) for p in DEF_PATTERNS)
+
+
 def find_callers(cs: ChangeSet, changes: list[EntityChange], changed_paths: set[str]) -> None:
-    rev = cs.head_rev
-    budget = 60
+    """One `git grep` for every name that needs it (no lookup budget), so "no callers" is only ever claimed
+    for names that were actually searched."""
+    want: dict[str, list[EntityChange]] = {}
     for c in changes:
-        if budget <= 0:
-            break
         if c.kind != "function":
             continue
-        need = c.status in ("removed", "added") or c.signature_changed
-        if not need:
+        if not (c.status in ("removed", "added") or c.signature_changed):
             continue
         short = c.name.split(".")[-1]
         if short in GENERIC_NAMES or len(short) < 4 or short.startswith("__"):
             continue
-        budget -= 1
-        hits = grep_word(cs.repo, short, rev=rev, limit=60)
-        ent = c.after or c.before or {}
-        start, end = ent.get("line", 0), ent.get("end_line", 0)
-        callers = []
-        for path, ln, text in hits:
-            if path == c.file and start <= ln <= end:
-                continue
-            if re.match(rf"^\s*(async\s+)?(def|function|class)\s+{re.escape(short)}\b", text):
-                continue
-            if re.match(rf"^\s*(export\s+)?(const|let|var)\s+{re.escape(short)}\b", text):
-                continue
-            if text.lstrip().startswith(("import ", "from ", "#", "//", "*")) and "(" not in text:
-                continue
-            callers.append({"file": path, "line": ln, "text": text, "in_diff": path in changed_paths})
-        c.callers = callers[:25]
+        want.setdefault(short, []).append(c)
+    if not want:
+        return
+    hits_by_name: dict[str, list[tuple[str, int, str]]] = {n: [] for n in want}
+    names = sorted(want)
+    for i in range(0, len(names), 200):                       # keep argv sane on huge diffs
+        for path, ln, text in grep_words(cs.repo, names[i:i + 200], rev=cs.head_rev):
+            for n in re.findall(r"[A-Za-z_$][\w$]*", text):
+                if n in hits_by_name and len(hits_by_name[n]) < 200:
+                    hits_by_name[n].append((path, ln, text))
+    for short, cs_ in want.items():
+        hits = hits_by_name[short]
+        for c in cs_:
+            ent = c.after or c.before or {}
+            start, end = ent.get("line", 0), ent.get("end_line", 0)
+            callers = []
+            for path, ln, text in hits:
+                if path == c.file and start <= ln <= end and c.status != "removed":
+                    continue
+                if _is_definition(short, text):
+                    if c.status == "removed":
+                        c.still_defined = True               # renamed/moved/twin: refs may point at the live one
+                    continue
+                if text.lstrip().startswith(("import ", "from ", "#", "//", "*")) and "(" not in text:
+                    continue
+                callers.append({"file": path, "line": ln, "text": text, "in_diff": path in changed_paths})
+            c.callers = callers[:25]
+            c.callers_checked = True
 
 
 def file_rank(fc: FileChange, ents: list[EntityChange], risks: list[RiskFlag]) -> tuple[float, list[str]]:
@@ -185,6 +208,11 @@ def file_rank(fc: FileChange, ents: list[EntityChange], risks: list[RiskFlag]) -
         reasons.append(f"{n} {kind}{'s' if n > 1 else ''} {status}")
     score += sum(KIND_WEIGHT.get(e.kind, 1) for e in ents)
     score += min((fc.additions + fc.deletions) / 40.0, 5)
+    m = risk.SENSITIVE_PATH_RE.search(fc.path) or next((risk.SENSITIVE_PATH_RE.search(e.name) for e in ents
+                                                       if e.kind == "function" and risk.SENSITIVE_PATH_RE.search(e.name)), None)
+    if m and fc.category == "source":
+        score += 3                                    # money/auth code reads first, but it isn't a "risk" by itself
+        reasons.append(f"{m.group(0).lower()} code")
     if not reasons:
         fn = sum(1 for e in ents if e.kind == "function")
         if fn:
@@ -360,6 +388,7 @@ def analyze(cs: ChangeSet, with_callers: bool = True, intent: str | None = None)
         "llm": {"status": "skipped", "reason": "not run"},
         "topics": [],
         "errors": errors,
+        "suppressed": sorted(ctx.suppressed.values(), key=lambda x: -x["would_flag"]),
         "timing_ms": int((time.time() - t0) * 1000),
     }
     report["topics"] = assign_topics(report["changes"], report["files"], report["risks"])

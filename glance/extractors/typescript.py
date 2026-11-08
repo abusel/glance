@@ -635,13 +635,26 @@ class _Extractor:
                 name = str_value(a[0]) if a else None
             if not name or name in seen:
                 continue
+            p = n.parent
+            if p is not None and p.type == "assignment_expression" and p.child_by_field_name("left") == n:
+                continue                    # `process.env.X = ...` sets it (tests, scripts); it isn't a read
             seen.add(name)
             default = "(required)"
-            p = n.parent
             if p is not None and p.type == "binary_expression":
                 op = p.child_by_field_name("operator")
-                if op is not None and txt(op) in ("??", "||") and p.child_by_field_name("left") == n:
+                ops = txt(op) if op is not None else ""
+                if ops in ("??", "||") and p.child_by_field_name("left") == n:
                     default = compact(txt(p.child_by_field_name("right")), 80)
+                elif ops in ("===", "==", "!==", "!="):
+                    # a feature flag: unset simply means "not equal", so it can't break a deploy
+                    other = p.child_by_field_name("right") if p.child_by_field_name("left") == n else p.child_by_field_name("left")
+                    lit = str_value(other) if other is not None else None
+                    if lit is None:
+                        default = "(compared)"
+                    elif ops.startswith("!"):
+                        default = f"flag: on unless set to {lit!r}"
+                    else:
+                        default = f"flag: off unless set to {lit!r}"
             self.ent("env", name, n, framework="process.env", fields={"default": default})
 
     # ------------------------------------------------------------------ migrations (Knex / TypeORM)
