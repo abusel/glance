@@ -134,7 +134,7 @@ section.sec > h2::after { order: 2; }
 .st-h + .urow { border-top: 0; }
 .urow .nm { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--ink); }
 .urow .what { font-size: 14px; color: var(--ink); margin-top: 3px; }
-.urow .why { font-size: 13px; color: var(--muted); margin-top: 1px; }
+.urow .uwhy { font-size: 13px; color: var(--muted); margin-top: 1px; }
 .urow .det { font-family: var(--mono); font-size: 11.5px; color: var(--muted); margin-top: 3px; word-break: break-word; }
 .urow .meta { display: flex; gap: 10px; align-items: center; margin-top: 5px; flex-wrap: wrap; }
 .urow > .diff, .urow > .ftable { grid-column: 1 / -1; margin: 8px -18px -10px; border-top: 1px solid var(--line-2); }
@@ -1027,7 +1027,7 @@ function unitRow(u, ai) {
       h("span", { class: "fw" }, u.kind === "function" && u.chapter === "background" && u.detail.includes("steps") ? "workflow" : u.kind),
       u.used_by_routes ? h("span", { class: "tag-route", title: "Referenced by changed route/controller code" }, " used by routes") : null),
     ai && ai.what ? h("div", { class: "what" }, ai.what) : null,
-    ai && ai.why ? h("div", { class: "why" }, ai.why) : null,
+    ai && ai.why ? h("div", { class: "uwhy" }, ai.why) : null,
     u.detail ? h("div", { class: "det" }, u.detail) : null);
   const meta = h("div", { class: "meta" });
   if (c0 && (c0.field_changes || []).length && ["table", "model", "type"].includes(c0.kind)) {
