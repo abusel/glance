@@ -53,6 +53,15 @@ button { font: inherit; color: inherit; }
 .btn:hover { border-color: var(--faint); }
 .btn:disabled { opacity: .5; cursor: default; }
 .progress { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.meters { display: flex; align-items: center; gap: 14px; }
+.meter { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--muted); cursor: pointer; min-width: 74px; }
+.meter:hover { color: var(--ink); }
+.meter .t b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.meter .bar { width: 74px; height: 4px; }
+.meter.full .bar > span { background: var(--add-ink); }
+.meter.full .t b { color: var(--add-ink); }
+.merge { font-size: 12px; font-weight: 650; color: var(--add-ink); background: var(--add-bg); border-radius: 999px; padding: 3px 10px; }
+.merge.not { color: var(--muted); background: var(--line-2); font-weight: 500; }
 .bar { width: 90px; height: 6px; border-radius: 6px; background: var(--line); overflow: hidden; }
 .bar > span { display: block; height: 100%; background: var(--accent); width: 0; transition: width .25s; }
 
@@ -162,7 +171,54 @@ section.sec > h2::after { order: 2; }
 .dec.agreed:not(.peek) .dtitle { opacity: .55; font-size: 14px; }
 .dec.agreed:not(.peek) .dhd { cursor: pointer; padding-top: 9px; padding-bottom: 9px; }
 .dec-intro { color: var(--muted); font-size: 13px; margin: -4px 2px 12px; max-width: 80ch; }
-.dec-export { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; padding: 10px 16px; font-size: 13px; color: var(--ink-2); }
+
+/* ---------- behavior (scenario tables) ---------- */
+.scard { padding: 0; }
+.scard .shd { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; padding: 12px 16px 10px; align-items: start; }
+.scard .stitle { font-size: 15px; font-weight: 600; color: var(--ink); }
+.scard .subj { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-top: 2px; }
+.scard .rule { font-size: 13.5px; color: var(--ink-2); margin-top: 4px; }
+table.sc { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+table.sc th:nth-child(1) { width: 34%; } table.sc th:nth-child(2) { width: 28%; } table.sc th:nth-child(4) { width: 76px; }
+table.sc th { text-align: left; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); font-weight: 650; padding: 6px 12px; border-top: 1px solid var(--line-2); background: var(--panel-2); }
+table.sc td { padding: 7px 12px; border-top: 1px solid var(--line-2); vertical-align: top; color: var(--ink-2); }
+table.sc td:first-child { padding-left: 16px; color: var(--ink); }
+table.sc th:first-child { padding-left: 16px; }
+table.sc .inp { display: block; font-family: var(--mono); font-size: 11px; color: var(--faint); margin-top: 1px; word-break: break-all; }
+table.sc tr.chg td.aft { color: var(--ink); font-weight: 560; background: var(--accent-soft); }
+table.sc tr.same td.aft::after { content: "  same"; color: var(--faint); font-size: 11px; font-weight: 400; }
+table.sc td.na { color: var(--faint); font-style: italic; }
+table.sc td.unc { color: var(--med); }
+table.sc td.fl { white-space: nowrap; text-align: right; padding-right: 14px; }
+table.sc tr.flagged td { background: var(--high-soft); }
+table.sc tr.flagged td.aft { background: var(--high-soft); }
+.flagbtn { border: 0; background: none; cursor: pointer; color: var(--faint); font-size: 12px; padding: 0; }
+.flagbtn:hover, .flagbtn.on { color: var(--high); }
+table.sc tr.note td { padding: 0 14px 8px 16px; background: var(--high-soft); border-top: 0; }
+.flagnote { width: 100%; font: 13px/1.4 var(--sans); color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+.scard .dfoot, .qrow .dfoot { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 8px 16px; border-top: 1px solid var(--line-2); }
+.scard .dfoot .spacer { flex: 1; }
+.scard > .diff { border-top: 1px solid var(--line-2); }
+.scard.done:not(.peek) > :not(.shd), .scard.done:not(.peek) .shd .subj, .scard.done:not(.peek) .shd .rule { display: none; }
+.scard.done:not(.peek) .stitle { opacity: .55; font-size: 14px; }
+.scard.done:not(.peek) .shd { cursor: pointer; padding-top: 9px; padding-bottom: 9px; }
+
+/* ---------- comprehension ---------- */
+.qrow { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--line-2); align-items: start; }
+.qrow:first-child { border-top: 0; }
+.qrow .qt { font-size: 14.5px; color: var(--ink); font-weight: 520; }
+.qrow .ans { margin-top: 8px; padding: 8px 12px; border-left: 2px solid var(--accent); background: var(--panel-2); font-size: 13.5px; color: var(--ink-2); border-radius: 0 6px 6px 0; }
+.qrow .qmeta { display: flex; gap: 12px; align-items: center; margin-top: 5px; flex-wrap: wrap; }
+.qrow > .diff { grid-column: 1 / -1; margin: 4px -16px -12px; }
+.qrow.done:not(.peek) > .diff, .qrow.done:not(.peek) .qmeta, .qrow.done:not(.peek) .ans { display: none; }
+.qrow.resolvedrow .qt, .qrow.resolvedrow .mine { opacity: .55; }
+.qrow.done:not(.peek) .qt { opacity: .55; font-weight: 400; }
+.qrow.done:not(.peek) { cursor: pointer; padding-top: 8px; padding-bottom: 8px; }
+.qrow .mine { font-size: 13px; color: var(--ink-2); margin-top: 3px; white-space: pre-line; }
+.vtag { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; }
+.vtag.question { color: var(--med); background: var(--med-soft); } .vtag.disagree { color: var(--high); background: var(--high-soft); }
+.resolve { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
+.dec .dres { padding: 0 16px 12px; }
 
 /* ---------- intent ---------- */
 .intentcard .asked { display: block; line-height: 1.55; }
@@ -499,9 +555,12 @@ function storeKey() { return `glance:${R.repo_path}:${R.base.rev}:${R.head.ref}`
 function loadReviewed() {
   try { reviewed = JSON.parse(localStorage.getItem(storeKey()) || "{}") || {}; } catch { reviewed = {}; }
   try { dverdicts = JSON.parse(localStorage.getItem(storeKey() + ":decisions") || "{}") || {}; } catch { dverdicts = {}; }
+  try { flags = JSON.parse(localStorage.getItem(storeKey() + ":flags") || "{}") || {}; } catch { flags = {}; }
 }
-let dverdicts = {};                // decision id -> {v: "agree"|"question"|"disagree", note, at}
-function saveVerdicts() { try { localStorage.setItem(storeKey() + ":decisions", JSON.stringify(dverdicts)); } catch {} }
+let dverdicts = {};                // decision id -> {v: "agree"|"question"|"disagree", note, at, resolved}
+let flags = {};                    // "row:<scenario>:<i>" | "q:<question>" -> {note}: things to ask the agent about
+function saveVerdicts() { try { localStorage.setItem(storeKey() + ":decisions", JSON.stringify(dverdicts)); } catch {} updateProgress(); updateFeedback(); }
+function saveFlags() { try { localStorage.setItem(storeKey() + ":flags", JSON.stringify(flags)); } catch {} updateFeedback(); }
 function saveReviewed() { try { localStorage.setItem(storeKey(), JSON.stringify(reviewed)); } catch {} updateProgress(); }
 
 let DEFAULTS = {};                 // id -> pre-checked? (routine items, low risks)
@@ -564,16 +623,40 @@ function reviewables() {
   const ids = (storyAI().read_first || []).map(spotKey);
   ((R.story || {}).units || []).forEach(u => ids.push(unitKey(u)));
   riskItems().forEach(r => ids.push(r.id));
-  decisionItems().forEach(d => ids.push(d.rid));
   return [...new Set(ids)];
 }
-function updateProgress() {
+// A decision is settled when you agree, or when your question / disagreement has been resolved.
+function decisionSettled(d) { const v = dverdicts[d.id] || {}; return v.v === "agree" || (!!v.v && !!v.resolved); }
+// Three separate tracks: did you read what needs reading, did you sign off on the choices, do you understand it.
+function meters() {
   const ids = reviewables();
-  const done = ids.filter(isChecked).length;
-  const el = document.getElementById("prog");
-  if (!el) return;
-  el.querySelector("span.t").textContent = `${done}/${ids.length} reviewed`;
-  el.querySelector(".bar > span").style.width = (ids.length ? (100 * done / ids.length) : 0) + "%";
+  const ds = decisionItems();
+  const und = [...scenarioItems().map(s => s.rid), ...questionItems().map(q => q.rid)];
+  return [
+    { id: "read", label: "Read", sec: "story", done: ids.filter(isChecked).length, total: ids.length },
+    { id: "decisions", label: "Decisions", sec: "decisions", done: ds.filter(decisionSettled).length, total: ds.length },
+    { id: "understood", label: "Understood", sec: "understand", done: und.filter(isChecked).length, total: und.length },
+  ];
+}
+function updateProgress() {
+  const box = document.getElementById("prog");
+  if (!box) return;
+  const ms = meters();
+  box.innerHTML = "";
+  for (const m of ms) {
+    if (!m.total) continue;
+    const full = m.done === m.total;
+    box.append(h("div", { class: "meter" + (full ? " full" : ""), title: `Jump to ${m.label}`, onclick: () => goSection(m.sec) },
+      h("span", { class: "t" }, m.label + " ", h("b", {}, `${m.done}/${m.total}`)), h("div", { class: "bar" }, h("span", { style: `width:${100 * m.done / m.total}%` }))));
+  }
+  const ai = (R.llm || {}).status === "ok";
+  const ready = ai && ms.every(m => m.done === m.total) && ms.some(m => m.total);
+  if (ai) box.append(h("span", { class: "merge" + (ready ? "" : " not"), title: ready ? "Everything read, every decision settled, every question understood" : "Finish all three to merge with confidence" }, ready ? "✓ Ready to merge" : "Not ready"));
+}
+function goSection(id) {
+  const s = document.getElementById(id); if (!s) return;
+  rememberSpot(); s.classList.remove("collapsed"); secCollapsed[id] = false;
+  s.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 // ------------------------------------------------------------------ diff rendering
@@ -655,14 +738,16 @@ function renderTop() {
     sev.medium ? h("span", { class: "pill m" }, sev.medium + " medium") : null,
     sev.low ? h("span", { class: "pill l" }, sev.low + " low") : null,
     h("div", { class: "spacer" }),
-    h("div", { class: "progress", id: "prog" }, h("div", { class: "bar" }, h("span")), h("span", { class: "t" }, "")),
+    h("div", { class: "meters", id: "prog" }),
+    h("span", { id: "feedback" }),
     STATIC ? null : h("button", { class: "btn", id: "refresh", title: "Re-run analysis on the current working tree", onclick: refresh }, "↻ Refresh"),
   ].filter(Boolean));          // DOM append() would print "null" for skipped items
   updateProgress();
+  updateFeedback();
 }
 
 const SECTIONS = [
-  ["overview", "Overview"], ["decisions", "Decisions"], ["story", "Story"], ["risks", "Risks"], ["logic", "Business logic"], ["database", "Database"], ["schemas", "Schemas & types"],
+  ["overview", "Overview"], ["decisions", "Decisions"], ["behavior", "Behavior"], ["understand", "Comprehension"], ["story", "Step by step"], ["risks", "Risks"], ["logic", "Business logic"], ["database", "Database"], ["schemas", "Schemas & types"],
   ["interfaces", "Endpoints & tasks"], ["functions", "Functions"], ["files", "Files"],
 ];
 function sectionCounts() {
@@ -673,6 +758,8 @@ function sectionCounts() {
   return {
     overview: "",
     decisions: decisionItems().filter(inTopic).length,
+    behavior: scenarioItems().filter(inTopic).length,
+    understand: questionItems().filter(inTopic).length + decisionItems().filter(d => ["question", "disagree"].includes((dverdicts[d.id] || {}).v)).length,
     story: ((R.story || {}).units || []).filter(inTopic).length,
     risks: riskItems().filter(inTopic).length,
     logic: (llm.business_logic || []).filter(b => topicFilter === "all" || blTopic(b) === topicFilter).length + ch.filter(c => ["config", "agent"].includes(c.kind) && c.status !== "removed").length,
@@ -754,11 +841,9 @@ function renderOverview() {
   else if (R.commits && R.commits.length) hero.append(h("div", { class: "summary" }, R.commits[0].split("\n")[0]));
   if (R.summary.bullets.length) hero.append(h("ul", { class: "glance" }, R.summary.bullets.map(b => h("li", {}, b))));
   card.append(hero);
-  if (llm.status === "running") card.append(h("div", { class: "llm-state" }, h("span", { class: "spin" }), "Claude is reading the diff for intent, business logic and bugs. Static analysis below is ready now."));
-  else if (llm.status === "error") card.append(h("div", { class: "llm-state" }, "Model pass failed: " + (llm.error || "unknown error")));
-  else if (llm.status === "skipped") card.append(h("div", { class: "llm-state" }, "Static analysis only. " + (llm.reason === "disabled" ? "Model pass disabled." : "Install the `claude` CLI or set ANTHROPIC_API_KEY for summaries, intent check and business-logic review.")));
+  if (llm.status === "skipped" && STATIC) card.append(h("div", { class: "llm-state" }, "Static analysis only. " + (llm.reason === "disabled" ? "Model pass disabled." : "Install the `claude` CLI or set ANTHROPIC_API_KEY for summaries, intent check and business-logic review.")));
 
-  const out = [card];
+  const out = [card, h("div", { style: "height:10px" }), goalCard()];
   out.push(h("div", { style: "height:10px" }), intentCard());
   if (llm.status === "ok" && (llm.walkthrough || []).length && !((llm.story || {}).read_first || []).length) {
     const wc = h("div", { class: "card walk" });
@@ -789,10 +874,22 @@ function setVerdict(d, v, card) {
   const cur = dverdicts[d.id] || {};
   if (cur.v === v) delete dverdicts[d.id];                       // click again to clear
   else dverdicts[d.id] = { ...cur, v, at: new Date().toISOString().slice(0, 16).replace("T", " ") };
-  reviewed[d.rid] = dverdicts[d.id] ? 1 : 0;
-  saveVerdicts(); saveReviewed();
+  saveVerdicts();
   card.replaceWith(decisionCard(d));
-  drawDecisionExport();
+  renderRail();
+}
+function setResolved(d, on) {
+  if (!dverdicts[d.id]) return;
+  dverdicts[d.id].resolved = on;
+  saveVerdicts();
+  render();                         // the decision card and the Comprehension list both show it
+}
+function resolveBox(d) {
+  const dv = dverdicts[d.id] || {};
+  const c = h("input", { type: "checkbox", class: "chk" });
+  c.checked = !!dv.resolved;
+  c.addEventListener("change", () => setResolved(d, c.checked));
+  return h("label", { class: "resolve" }, c, dv.v === "disagree" ? "Resolved: fixed, or I'm convinced" : "Answered: I understand it now");
 }
 function decisionCard(d) {
   const units = Object.fromEntries(((R.story || {}).units || []).map(u => [u.id, u]));
@@ -816,39 +913,51 @@ function decisionCard(d) {
   if (dv.v === "question" || dv.v === "disagree") {
     const ta = h("textarea", { placeholder: dv.v === "question" ? "What do you want to know? (goes into the feedback you can copy for the agent)" : "What should it do instead, and why?" });
     ta.value = dv.note || "";
-    ta.addEventListener("input", () => { dverdicts[d.id].note = ta.value; saveVerdicts(); drawDecisionExport(); });
-    card.append(h("div", { class: "dnote" }, ta));
+    ta.addEventListener("input", () => { dverdicts[d.id].note = ta.value; saveVerdicts(); });
+    card.append(h("div", { class: "dnote" }, ta), h("div", { class: "dres" }, resolveBox(d)));
   }
   return card;
 }
-function decisionFeedback() {
-  const open = decisionItems().filter(d => ["question", "disagree"].includes((dverdicts[d.id] || {}).v));
-  if (!open.length) return "";
-  const L = ["Review feedback on the design decisions in this change:", ""];
-  open.forEach((d, i) => {
-    const dv = dverdicts[d.id];
-    L.push(`${i + 1}. ${dv.v === "disagree" ? "DISAGREE" : "QUESTION"}: ${d.title}`);
-    if (d.chose) L.push(`   You chose: ${d.chose}`);
-    if (d.alternative) L.push(`   Alternative: ${d.alternative}`);
-    if (dv.note && dv.note.trim()) L.push(`   Reviewer: ${dv.note.trim()}`);
-    const where = [...new Set((d.hunks || []).map(hid => HUNKS[hid] && `${HUNKS[hid].file}:${HUNKS[hid].hunk.new_start}`).filter(Boolean))];
-    if (where.length) L.push(`   Where: ${where.join(", ")}`);
-    L.push("");
+// Everything you want the agent to answer or change, as one prompt: open decision questions and disagreements,
+// behavior rows that aren't what you expect, comprehension questions you couldn't answer from the code.
+function feedbackText() {
+  const where = hs => [...new Set((hs || []).map(hid => HUNKS[hid] && `${HUNKS[hid].file}:${HUNKS[hid].hunk.new_start}`).filter(Boolean))].join(", ");
+  const items = [];
+  for (const d of decisionItems()) {
+    const dv = dverdicts[d.id] || {};
+    if (!["question", "disagree"].includes(dv.v) || dv.resolved) continue;
+    const L = [`${dv.v === "disagree" ? "DISAGREE with a decision" : "QUESTION about a decision"}: ${d.title}`];
+    if (d.chose) L.push(`You chose: ${d.chose}`);
+    if (d.alternative) L.push(`Alternative: ${d.alternative}`);
+    if (dv.note && dv.note.trim()) L.push(`Reviewer: ${dv.note.trim()}`);
+    if (where(d.hunks)) L.push(`Where: ${where(d.hunks)}`);
+    items.push(L);
+  }
+  for (const sc of scenarioItems()) sc.rows.forEach((r, i) => {
+    const f = flags[`row:${sc.id}:${i}`];
+    if (!f) return;
+    const L = [`UNEXPECTED BEHAVIOR in ${sc.title}${sc.subject ? ` (${sc.subject})` : ""}: ${r.case}`, `Before: ${r.before}`, `Now: ${r.after}`];
+    if (f.note && f.note.trim()) L.push(`Reviewer expected: ${f.note.trim()}`);
+    if (where(sc.hunks)) L.push(`Where: ${where(sc.hunks)}`);
+    items.push(L);
   });
-  L.push(open.some(d => dverdicts[d.id].v === "disagree") ? "Please address the disagreements (or explain why the current choice is right) and answer the questions." : "Please answer the questions; change the code only if the answer shows a problem.");
-  return L.join("\n");
+  for (const q of questionItems()) {
+    if (!flags["q:" + q.id] || isChecked(q.rid)) continue;
+    items.push([`EXPLAIN: ${q.q}`, ...(where(q.hunks) ? [`Where: ${where(q.hunks)}`] : [])]);
+  }
+  if (!items.length) return { n: 0, text: "" };
+  const text = ["Review feedback on this change. For each item, either change the code or explain why it's right.", "",
+    ...items.flatMap((L, i) => [`${i + 1}. ${L[0]}`, ...L.slice(1).map(x => "   " + x), ""])].join("\n");
+  return { n: items.length, text };
 }
-function drawDecisionExport() {
-  const box = document.getElementById("dec-export");
+function updateFeedback() {
+  const box = document.getElementById("feedback");
   if (!box) return;
-  const items = decisionItems();
-  const n = v => items.filter(d => (dverdicts[d.id] || {}).v === v).length;
-  const open = n("question") + n("disagree");
+  const fb = feedbackText();
   box.innerHTML = "";
-  box.append(h("span", {}, `${n("agree")}/${items.length} agreed`, n("question") ? ` · ${n("question")} questioned` : "", n("disagree") ? ` · ${n("disagree")} disagreed` : ""));
-  if (open) box.append(h("span", { style: "flex:1" }), h("button", { class: "btn ai", title: "Copy your questions and disagreements as a prompt for the agent that wrote this", onclick: async () => {
-    try { await navigator.clipboard.writeText(decisionFeedback()); toast("Feedback copied — paste it to the agent"); } catch { toast("Couldn't copy to the clipboard"); }
-  } }, `Copy feedback for the agent (${open})`));
+  if (fb.n) box.append(h("button", { class: "btn ai", title: "Copy your open questions, disagreements and flagged behavior as a prompt for the agent that wrote this", onclick: async () => {
+    try { await navigator.clipboard.writeText(feedbackText().text); toast("Feedback copied: paste it to the agent"); } catch { toast("Couldn't copy to the clipboard"); }
+  } }, `Copy feedback (${fb.n})`));
 }
 function renderDecisions() {
   const llm = R.llm || {};
@@ -859,14 +968,140 @@ function renderDecisions() {
   else if (!(llm.decisions || []).length) out.push(h("div", { class: "empty" }, llm.carried && !("decisions" in llm) ? "This AI pass predates decision cards. Re-run it to see them." : "No real judgement calls found: this change looks mechanical."));
   else if (!items.length) out.push(h("div", { class: "empty" }, "No decisions in this topic."));
   else {
-    out.push(h("div", { class: "dec-intro" }, "The choices where a competent engineer could have gone another way. Make a call on each one; anything you question or disagree with becomes feedback you can hand back to the agent."));
+    out.push(h("div", { class: "dec-intro" }, "The choices where a competent engineer could have gone another way. Make a call on each one. A question or disagreement stays open until you mark it resolved, and goes into the feedback you can copy for the agent."));
     const order = { high: 0, medium: 1, low: 2 };
     items.sort((a, b) => order[a.weight] - order[b.weight]).forEach(d => out.push(decisionCard(d)));
-    out.push(h("div", { class: "card dec-export", id: "dec-export" }));
   }
-  const sec = secEl("decisions", "Decisions", ...out);
-  setTimeout(drawDecisionExport);
-  return sec;
+  return secEl("decisions", "Decisions", ...out);
+}
+
+// ------------------------------------------------------------------ behavior: before/after scenario tables
+function scenarioItems() {
+  const llm = R.llm || {};
+  if (llm.status !== "ok") return [];
+  return (llm.scenarios || []).map(sc => {
+    const first = HUNKS[(sc.hunks || [])[0]];
+    return { ...sc, rid: "sc:" + sc.id, file: first?.file, line: first?.hunk.new_start, topic: topicOf({ file: first?.file }) };
+  });
+}
+function cellClass(text, base) {
+  const t = String(text || "").toLowerCase();
+  return base + (t.startsWith("n/a") || t === "—" ? " na" : t.startsWith("unclear") ? " unc" : "");
+}
+function inputText(inp) {
+  if (!inp || !Object.keys(inp).length) return null;
+  return Object.entries(inp).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(", ");
+}
+function scenarioCard(sc) {
+  const units = Object.fromEntries(((R.story || {}).units || []).map(u => [u.id, u]));
+  const card = h("div", { class: "card scard", id: "sc-" + sc.id });
+  const meta = [];
+  if (sc.stale) meta.push(h("span", { class: "verdict stale", title: "The code behind this table changed since it was written" }, "code changed"));
+  const changed = sc.rows.filter(r => r.changed).length;
+  card.append(h("div", { class: "shd" }, check(sc.rid, card),
+    h("div", {}, h("div", { class: "stitle" }, sc.title), sc.subject ? h("div", { class: "subj" }, sc.subject) : null, sc.rule ? h("div", { class: "rule" }, sc.rule) : null),
+    h("div", { class: "src", style: "text-align:right" }, `${changed} of ${sc.rows.length} change`, ...meta)));
+  const t = h("table", { class: "sc" }, h("tr", {}, h("th", {}, "Case"), h("th", {}, "Before"), h("th", {}, "After"), h("th", {}, "")));
+  sc.rows.forEach((r, i) => {
+    const key = `row:${sc.id}:${i}`;
+    const tr = h("tr", { class: (r.changed ? "chg" : "same") + (flags[key] ? " flagged" : "") });
+    const inp = inputText(r.input);
+    const btn = h("button", { class: "flagbtn" + (flags[key] ? " on" : ""), title: "Not what I expect: add this row to the feedback for the agent" }, flags[key] ? "⚑ flagged" : "⚑");
+    btn.addEventListener("click", () => {
+      if (flags[key]) delete flags[key]; else flags[key] = { note: "" };
+      saveFlags();
+      card.replaceWith(scenarioCard(sc));
+    });
+    tr.append(h("td", {}, r.case, inp ? h("span", { class: "inp" }, inp) : null), h("td", { class: cellClass(r.before, "bef") }, r.before),
+      h("td", { class: cellClass(r.after, "aft") }, r.after), h("td", { class: "fl" }, btn));
+    t.append(tr);
+    if (flags[key]) {
+      const note = h("input", { class: "flagnote", placeholder: "What did you expect instead?" });
+      note.value = flags[key].note || "";
+      note.addEventListener("input", () => { flags[key].note = note.value; saveFlags(); });
+      t.append(h("tr", { class: "note" }, h("td", { colspan: 4 }, note)));
+    }
+  });
+  card.append(t);
+  const foot = h("div", { class: "dfoot" });
+  for (const id of sc.units || []) if (units[id]) foot.append(h("span", { class: "chip", title: "Jump to " + units[id].name, onclick: () => jumpUnit(id) }, units[id].name));
+  foot.append(h("span", { class: "spacer" }), codeToggle(foot, sc.hunks, "show code") || h("span"), loc(sc.file, sc.line) || h("span"));
+  card.append(foot);
+  return card;
+}
+function renderBehavior() {
+  const llm = R.llm || {};
+  const items = scenarioItems().filter(inTopic);
+  const out = [];
+  if (llm.status === "running") out.push(h("div", { class: "card llm-state" }, h("span", { class: "spin" }), "Claude is working out what behaves differently…"));
+  else if (llm.status !== "ok") out.push(h("div", { class: "empty" }, "With the model pass, the important rule changes show up here as tables: concrete inputs, what happened before, what happens now."));
+  else if (!("scenarios" in llm)) out.push(h("div", { class: "empty" }, "This AI pass predates behavior tables. Re-run it to see them."));
+  else if (!items.length) out.push(h("div", { class: "empty" }, (llm.scenarios || []).length ? "No behavior tables in this topic." : "No rule changes to tabulate: nothing here changes what the system does for a given input."));
+  else {
+    out.push(h("div", { class: "dec-intro" }, "What the code does with real inputs, before and after this change. Highlighted rows are where behavior changes. Flag ⚑ any row that isn't what you expect."));
+    items.forEach(sc => out.push(scenarioCard(sc)));
+  }
+  return secEl("behavior", "What behaves differently", ...out);
+}
+
+// ------------------------------------------------------------------ comprehension
+function questionItems() {
+  const llm = R.llm || {};
+  if (llm.status !== "ok") return [];
+  return (llm.questions || []).map(q => {
+    const first = HUNKS[(q.hunks || [])[0]];
+    return { ...q, rid: "q:" + q.id, file: first?.file, topic: topicOf({ file: first?.file }) };
+  });
+}
+function questionRow(q, i) {
+  const row = h("div", { class: "qrow", id: "q-" + q.id });
+  const body = h("div", {}, h("div", { class: "qt" }, `${i + 1}. ${q.q}`));
+  const meta = h("div", { class: "qmeta" });
+  let ans = null;
+  const reveal = h("button", { class: "toggle", title: "Try to answer it first" }, "show answer");
+  reveal.addEventListener("click", () => {
+    if (ans) { ans.remove(); ans = null; reveal.textContent = "show answer"; return; }
+    ans = h("div", { class: "ans" }, q.answer || "—");
+    meta.before(ans); reveal.textContent = "hide answer";
+  });
+  const fk = "q:" + q.id;
+  const ask = h("button", { class: "toggle", title: "You can't tell from the code: ask the agent to explain (adds it to the feedback)" }, flags[fk] ? "✓ asking the agent" : "ask the agent");
+  ask.addEventListener("click", () => { if (flags[fk]) delete flags[fk]; else flags[fk] = {}; saveFlags(); ask.textContent = flags[fk] ? "✓ asking the agent" : "ask the agent"; });
+  meta.append(reveal, codeToggle(body, q.hunks, "show code") || h("span"), ask);
+  if (q.stale) meta.append(h("span", { class: "verdict stale", title: "The code this is about changed since the question was written" }, "code changed"));
+  body.append(meta);
+  row.append(check(q.rid, row), body, h("span"));
+  return row;
+}
+function renderUnderstand() {
+  const llm = R.llm || {};
+  const qs = questionItems().filter(inTopic);
+  const mine = decisionItems().filter(inTopic).filter(d => ["question", "disagree"].includes((dverdicts[d.id] || {}).v));
+  const out = [];
+  if (llm.status === "running") out.push(h("div", { class: "card llm-state" }, h("span", { class: "spin" }), "Claude is writing the questions you should be able to answer…"));
+  else if (llm.status !== "ok") out.push(h("div", { class: "empty" }, "With the model pass, you get the questions you should be able to answer before merging, with answers hidden until you try."));
+  else if (!("questions" in llm) && !mine.length) out.push(h("div", { class: "empty" }, "This AI pass predates comprehension questions. Re-run it to see them."));
+  if (qs.length) {
+    out.push(h("div", { class: "dec-intro" }, "Answer each one in your head, then check it off. The answers are hidden so you try first. When all of these are checked, you understand the change, not just its variable names."));
+    const card = h("div", { class: "card" });
+    qs.forEach((q, i) => card.append(questionRow(q, i)));
+    out.push(card);
+  }
+  if (mine.length) {
+    out.push(h("div", { class: "src", style: "margin:18px 0 6px 2px" }, "Your open questions and pushback"));
+    const card = h("div", { class: "card" });
+    for (const d of mine) {
+      const dv = dverdicts[d.id];
+      const row = h("div", { class: "qrow" + (dv.resolved ? " resolvedrow" : "") });
+      row.append(h("span"), h("div", {},
+        h("div", { class: "qt" }, h("span", { class: "vtag " + dv.v }, dv.v), " ", d.title),
+        dv.note ? h("div", { class: "mine" }, dv.note) : null,
+        h("div", { class: "qmeta" }, resolveBox(d), h("button", { class: "toggle", onclick: () => { const el = document.getElementById("dec-" + d.id); if (el) { rememberSpot(); reveal(el); el.scrollIntoView({ behavior: "smooth", block: "center" }); } } }, "go to decision"))), h("span"));
+      card.append(row);
+    }
+    out.push(card);
+  }
+  return secEl("understand", "Can you answer these?", ...out);
 }
 
 function riskItems() {
@@ -1318,6 +1553,32 @@ function unitRow(u, ai) {
   row.append(check(`s:${u.chapter}:${u.name}`, row), body, loc(u.file, u.line) || h("span"));
   return row;
 }
+// The quick story: what this accomplishes and how it works, in a product person's words. Lives in Overview so
+// the page reads story → decisions → behavior → comprehension → segments.
+function goalCard() {
+  const st = R.story || { units: [] };
+  const llm = R.llm || {};
+  const ai = (llm.status === "ok" && llm.story) || {};
+  const units = Object.fromEntries((st.units || []).map(u => [u.id, u]));
+  const goal = h("div", { class: "card goal" });
+  goal.append(h("div", { class: "src", style: "margin-bottom:8px" }, "What this accomplishes"));
+  if (ai.goal) goal.append(h("div", { class: "lead" }, ai.goal));
+  else goal.append(h("div", { class: "lead muted" }, (R.commits && R.commits.length ? R.commits[0].split("\n")[0] : R.summary.headline)));
+  if ((ai.how_it_works || []).length) {
+    goal.append(h("div", { class: "src", style: "margin-top:16px" }, "How it works"),
+      h("ol", { class: "flow" }, ai.how_it_works.map(step => h("li", {}, h("div", {}, step.text, h("div", {},
+        step.units.filter(id => units[id]).map(id => h("span", { class: "chip", title: "Jump to " + units[id].name, onclick: () => jumpUnit(id) }, units[id].name))))))));
+  }
+  const bar = h("div", { class: "aibar" });
+  if (llm.status === "running") bar.append(h("span", { class: "spin" }), "Claude is reading the change: story, decisions, behavior and questions (usually 2–5 minutes). The structural sections below are ready now.");
+  else if (llm.status !== "ok") {
+    if (!STATIC) bar.append(h("button", { class: "btn ai", onclick: startModelPass }, "✨ Generate AI summary"));
+    bar.append(llm.status === "error" ? "Last attempt failed: " + (llm.error || "unknown error") : "Adds the plain-English story, the decisions to sign off on, before/after behavior tables and the questions you should be able to answer.");
+  }
+  if (bar.childNodes.length) goal.append(bar);
+  return goal;
+}
+
 function renderStory() {
   const st = R.story;
   if (!st || !(st.units || []).length) return secEl("story", "The change, step by step", h("div", { class: "empty" }, "Nothing to narrate."));
@@ -1327,29 +1588,11 @@ function renderStory() {
   const units = Object.fromEntries(st.units.map(u => [u.id, u]));
   const out = [];
 
-  // 1. goal
-  const goal = h("div", { class: "card goal" });
-  goal.append(h("div", { class: "chap-hd", style: "padding:0 0 10px" }, h("span", { class: "num" }, 1), h("div", {}, h("h3", {}, "What this accomplishes")), h("span")));
-  if (ai.goal) goal.append(h("div", { class: "lead" }, ai.goal));
-  else goal.append(h("div", { class: "lead muted" }, (R.commits && R.commits.length ? R.commits[0].split("\n")[0] : R.summary.headline)));
-  if ((ai.how_it_works || []).length) {
-    goal.append(h("div", { class: "src", style: "margin-top:16px" }, "How it works"),
-      h("ol", { class: "flow" }, ai.how_it_works.map(step => h("li", {}, h("div", {}, step.text, h("div", {},
-        step.units.filter(id => units[id]).map(id => h("span", { class: "chip", title: "Jump to " + units[id].name, onclick: () => jumpUnit(id) }, units[id].name))))))));
-  }
-  const bar = h("div", { class: "aibar" });
-  if (llm.status === "running") bar.append(h("span", { class: "spin" }), "Claude is reading the change and writing the walkthrough (usually 2–5 minutes). Everything below is already accurate; explanations fill in when it lands.");
-  else if (llm.status !== "ok") {
-    if (!STATIC) bar.append(h("button", { class: "btn ai", onclick: startModelPass }, "✨ Generate AI summary"));
-    bar.append(llm.status === "error" ? "Last attempt failed: " + (llm.error || "unknown error") : "Adds a plain-English goal, how-it-works steps and a what/why for every item below.");
-  }
-  if (bar.childNodes.length) goal.append(bar);
-  out.push(goal);
   const rf = readFirstCard(ai, units);
   if (rf) out.push(rf);
 
-  // 2-6. chapters
-  let n = 1;
+  // chapters: the segments, each a click away
+  let n = 0;
   for (const ch of st.chapters) {
     if (ch.id === "goal") continue;
     const us = ch.unit_ids.map(id => units[id]).filter(u => u && inTopic(u));
@@ -1443,7 +1686,7 @@ function render() {
   const y = window.scrollY;
   main.innerHTML = "";
   if (R.errors && R.errors.length) main.append(h("div", { class: "card", style: "padding:10px 16px;margin-bottom:16px;color:var(--high);font-size:13px" }, R.errors.join("\n")));
-  main.append(renderOverview(), renderDecisions(), renderStory(), renderRisks(), renderLogic(), renderLayer("database"), renderLayer("schemas"), renderInterfaces(), renderFunctions(), renderFiles());
+  main.append(renderOverview(), renderDecisions(), renderBehavior(), renderUnderstand(), renderStory(), renderRisks(), renderLogic(), renderLayer("database"), renderLayer("schemas"), renderInterfaces(), renderFunctions(), renderFiles());
   updateBack();
   syncGroups();
   window.scrollTo(0, y);

@@ -492,3 +492,45 @@ def test_decisions_grounded_and_carried(py_report):
 
     assert "Decisions to agree with" in render({**py_report, "llm": old["llm"]})
     assert '"decisions"' in llm.build_prompt(py_report)
+
+
+def test_scenarios_and_questions(py_report):
+    import copy
+
+    from glance.llm import attach_evidence, carry_over, ground
+
+    h1 = next(f for f in py_report["files"] if f["hunks"])["hunks"][0]["id"]
+    data = {"business_logic": [], "concerns": [], "walkthrough": [],
+            "scenarios": [
+                {"title": "Fee", "subject": "fee(amount)", "rule": "half price under 10k", "hunks": [h1, "h_x"], "units": ["nope"],
+                 "rows": [{"case": "$5k", "input": {"amount": 5000}, "before": "$50", "after": "$25"},
+                          {"case": "$20k", "input": "bad", "before": "$200", "after": "$200."},
+                          {"case": "null", "before": "TypeError", "after": "unclear: depends on caller"},
+                          {"before": "no case"}, "junk"]},
+                {"title": "No rows", "hunks": [h1], "rows": []},
+                {"title": "Uncited", "hunks": ["h_x"], "rows": [{"case": "a", "before": "b", "after": "c"}]}],
+            "questions": [{"q": "What if it fails?", "answer": "Rolls back.", "hunks": [h1]}, {"q": "", "hunks": [h1]},
+                          {"q": "Uncited?", "hunks": []}]}
+    out, dropped = ground(data, {h1}, set())
+    assert dropped == 2
+    [sc] = out["scenarios"]
+    assert sc["units"] == [] and sc["id"].startswith("s_") and len(sc["rows"]) == 3
+    a, b, c = sc["rows"]
+    assert a["changed"] and a["input"] == {"amount": 5000}
+    assert not b["changed"] and b["input"] is None          # "$200" vs "$200." is the same outcome
+    assert c["unclear"] and c["changed"]
+    [q] = out["questions"]
+    assert q["id"].startswith("q_") and q["answer"] == "Rolls back."
+
+    old = copy.deepcopy(py_report)
+    old["llm"] = attach_evidence({"status": "ok", **out}, old)
+    new = copy.deepcopy(py_report)
+    for f in new["files"]:
+        for hk in f["hunks"]:
+            if hk["id"] == h1:
+                hk["lines"].append(["+", None, 999, "# changed"])
+    carried = carry_over(old, new)
+    assert carried["scenarios"][0]["stale"] and carried["questions"][0]["stale"]
+
+    md = render({**py_report, "llm": old["llm"]})
+    assert "| $5k | $50 | **$25** |" in md and "What if it fails?" in md

@@ -59,8 +59,29 @@ def render(report: dict[str, Any], max_items: int = 40) -> str:
                 L.append(f"  - tradeoff: {d['tradeoff']}")
         L.append("")
 
+    scenarios = llm.get("scenarios") or [] if llm.get("status") == "ok" else []
+    if scenarios:
+        L.append("## What behaves differently")
+        cell = lambda x: str(x).replace("|", "\\|").replace("\n", " ")
+        for sc in scenarios:
+            L.append(f"**{sc['title']}**" + (f" · `{sc['subject']}`" if sc.get("subject") else ""))
+            if sc.get("rule"):
+                L.append(f"_{sc['rule']}_")
+            L += ["", "| case | before | after |", "|---|---|---|"]
+            for row in sc["rows"]:
+                after = f"**{cell(row['after'])}**" if row.get("changed") else cell(row["after"])
+                L.append(f"| {cell(row['case'])} | {cell(row['before'])} | {after} |")
+            L.append("")
+
+    questions = llm.get("questions") or [] if llm.get("status") == "ok" else []
+    if questions:
+        L.append("## Can you answer these before merging?")
+        for q in questions:
+            L.append(f"- **{q['q']}**" + (f"  \n  _{q['answer']}_" if q.get("answer") else ""))
+        L.append("")
+
     risks = r["risks"]
-    concerns =llm.get("concerns") or [] if llm.get("status") == "ok" else []
+    concerns = llm.get("concerns") or [] if llm.get("status") == "ok" else []
     if risks or concerns:
         L.append("## Risks")
         for c in concerns:

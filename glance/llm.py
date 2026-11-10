@@ -57,6 +57,28 @@ left out of scope, and behavior at boundaries. For each:
 Not decisions: naming, formatting, following an existing pattern in the codebase, anything with only one sane
 answer. 0-6 decisions, most consequential first; zero is fine for a mechanical change.
 
+Scenarios show behavior instead of describing it. For the 1-5 most important behavior changes (rules,
+thresholds, calculations, state transitions, permissions, failure handling), give a table of concrete inputs
+and what happens before and after this change:
+- title: the behavior ("Late fee calculation"). subject: what the inputs go into, as code
+  ("late_fee(balance, days_late)" or "POST /loans/{id}/repay"). rule: one sentence the table illustrates.
+- rows: 3-8 cases. Pick inputs that reveal the rule: a typical case, each boundary where the outcome flips
+  (exactly at the threshold and just either side), zero/empty/null, and the failure path. Each row is
+  {"case": the input in plain words, "input": the actual argument values as a JSON object (null if it isn't a
+  plain function call), "before": the outcome under the old code, "after": the outcome under the new code}.
+- Outcomes are concrete: numbers, states, status codes, which rows get written, what error is raised. Write
+  "n/a (didn't exist)" for before when the behavior is new and "n/a (removed)" for after when it's gone.
+- Work outcomes out by reading the code. Never guess: if the code doesn't determine it, write "unclear: <why>".
+- hunks: where the new behavior lives. units: story unit ids involved (may be empty).
+Skip scenarios for pure refactors, plumbing and CRUD with no rules.
+
+Questions check that the reviewer actually understands the change. Write 3-8 questions someone must be able
+to answer before merging this safely: about behavior, failure modes, data and the decisions above, not trivia
+or names ("What happens to an account that drops below 25% between nightly runs?", "If the Stripe call fails
+after the row is written, what state is the order left in?"). Each {"q": "...", "answer": "1-3 concrete
+sentences, citing the actual behavior", "hunks": ["h_..."]}. Prefer questions whose answer would surprise
+someone who skimmed the diff.
+
 The "story" explains the change the way a teammate would walk someone through a feature: first the goal, then
 the records we store, then the routes that touch them, then the schemas those routes use, then the background
 work. Static analysis already sorted the change into "Story units" (listed below, ids like "u3"); you write
@@ -88,6 +110,9 @@ Return ONLY a JSON object, no prose, matching:
   "walkthrough": [{"step": "short sentence on what to read and why", "hunks": ["h_..."]}],
   "decisions": [{"title": "...", "chose": "...", "alternative": "...", "tradeoff": "...", "weight": "high|medium|low",
                  "hunks": ["h_..."], "units": ["u.."]}],
+  "scenarios": [{"title": "...", "subject": "...", "rule": "...", "hunks": ["h_..."], "units": ["u.."],
+                 "rows": [{"case": "...", "input": {} | null, "before": "...", "after": "..."}]}],
+  "questions": [{"q": "...", "answer": "...", "hunks": ["h_..."]}],
   "story": {"goal": "...", "how_it_works": [{"text": "...", "units": ["u1", "u4"]}],
             "chapters": {"database": "...", "routes": "...", "schemas": "...", "background": "...", "supporting": "..."},
             "units": {"u1": {"what": "...", "why": "...", "attention": "read|routine", "read_reason": "..."}},
@@ -215,7 +240,7 @@ def _call_anthropic(prompt: str, model: str, timeout: int) -> str:
     import anthropic
 
     client = anthropic.Anthropic(timeout=timeout)
-    msg = client.messages.create(model=model, max_tokens=8000, messages=[{"role": "user", "content": prompt}])
+    msg = client.messages.create(model=model, max_tokens=16000, messages=[{"role": "user", "content": prompt}])
     return "".join(getattr(b, "text", "") for b in msg.content)
 
 
@@ -241,6 +266,8 @@ def ground(result: dict, valid: set[str], units: set[str] | None = None, hunk_in
     result["walkthrough"] = keep(result.get("walkthrough"))
     raw_decisions = [d for d in result.get("decisions") or [] if isinstance(d, dict)]
     result["decisions"] = ground_decisions(keep(raw_decisions), units or set())
+    result["scenarios"] = ground_scenarios(keep(result.get("scenarios")), units or set())
+    result["questions"] = ground_questions(keep(result.get("questions")))
     intent = result.get("intent")
     if isinstance(intent, dict):
         extra = []
@@ -279,13 +306,54 @@ def ground_decisions(items: list, units: set[str]) -> list[dict]:
     return out[:6]
 
 
+def _same(a: str, b: str) -> bool:
+    norm = lambda x: re.sub(r"[\s.]+$", "", re.sub(r"\s+", " ", x.strip().lower()))
+    return norm(a) == norm(b)
+
+
+def ground_scenarios(items: list, units: set[str]) -> list[dict]:
+    """Behavior tables: drop empty rows, mark rows whose outcome actually changed, cap sizes."""
+    out = []
+    for sc in items:
+        rows = []
+        for r in sc.get("rows") or []:
+            if not isinstance(r, dict) or not str(r.get("case") or "").strip():
+                continue
+            before, after = str(r.get("before") or "").strip()[:300], str(r.get("after") or "").strip()[:300]
+            inp = r.get("input") if isinstance(r.get("input"), dict) else None
+            rows.append({"case": str(r["case"]).strip()[:300], "input": inp, "before": before or "—", "after": after or "—",
+                         "changed": not _same(before, after),
+                         "unclear": before.lower().startswith("unclear") or after.lower().startswith("unclear")})
+        if not rows or not str(sc.get("title") or "").strip():
+            continue
+        item = {"title": str(sc["title"]).strip()[:200], "subject": str(sc.get("subject") or "").strip()[:200],
+                "rule": str(sc.get("rule") or "").strip()[:400], "rows": rows[:10], "hunks": sc["hunks"],
+                "units": [u for u in sc.get("units") or [] if u in units]}
+        item["id"] = "s_" + hashlib.sha1(f"{item['title']}|{item['subject']}".encode()).hexdigest()[:10]
+        out.append(item)
+    return out[:5]
+
+
+def ground_questions(items: list) -> list[dict]:
+    out = []
+    for q in items:
+        text = str(q.get("q") or "").strip()
+        if not text:
+            continue
+        out.append({"id": "q_" + hashlib.sha1(text.encode()).hexdigest()[:10], "q": text[:400],
+                    "answer": str(q.get("answer") or "").strip()[:900], "hunks": q["hunks"]})
+    return out[:8]
+
+
 def attach_evidence(result: dict, report: dict) -> dict:
     """Give each concern a stable id, its files, and the cited code, so it can be re-checked after edits.
     Decisions get a stable id and a fingerprint too, so a reviewer's verdict can be flagged when the code moves."""
     hunks = {h["id"]: (f["path"], h) for f in report["files"] for h in f["hunks"]}
     for d in result.get("decisions") or []:
         d["id"] = _decision_id(d)
-        d["fingerprint"] = {hid: _hunk_print(hunks[hid][1]) for hid in d["hunks"] if hid in hunks}
+    for key in ("decisions", "scenarios", "questions"):
+        for d in result.get(key) or []:
+            d["fingerprint"] = {hid: _hunk_print(hunks[hid][1]) for hid in d["hunks"] if hid in hunks}
     for c in result.get("concerns") or []:
         c["id"] = "c_" + hashlib.sha1(f"{c.get('title')}|{c.get('detail')}".encode()).hexdigest()[:10]
         c["files"] = sorted({hunks[h][0] for h in c["hunks"] if h in hunks})
@@ -323,14 +391,17 @@ def carry_over(old: dict, new: dict) -> dict:
         if len(kept) < len(c.get("hunks") or []) or edited:
             c["stale"] = True
         c["hunks"] = kept
-    for d in out.get("decisions") or []:
-        d.setdefault("id", _decision_id(d))
-        kept = [h for h in d.get("hunks") or [] if h in valid]
-        if len(kept) < len(d.get("hunks") or []) or any(prints.get(h) != fp for h, fp in (d.get("fingerprint") or {}).items()):
-            d["stale"] = True          # the code behind this choice changed since the reviewer saw it
-        d["hunks"] = kept
-    if "decisions" in out:             # absent = an AI pass from before decision cards existed
-        out["decisions"] = [d for d in out["decisions"] if d["hunks"]]
+    for key in ("decisions", "scenarios", "questions"):
+        if key not in out:             # absent = an AI pass from before this feature existed
+            continue
+        for d in out[key]:
+            if key == "decisions":
+                d.setdefault("id", _decision_id(d))
+            kept = [h for h in d.get("hunks") or [] if h in valid]
+            if len(kept) < len(d.get("hunks") or []) or any(prints.get(h) != fp for h, fp in (d.get("fingerprint") or {}).items()):
+                d["stale"] = True      # the code behind it changed since it was written (and since the reviewer saw it)
+            d["hunks"] = kept
+        out[key] = [d for d in out[key] if d["hunks"]]
     for key in ("business_logic", "walkthrough"):
         out[key] = [dict(it, hunks=[h for h in it.get("hunks") or [] if h in valid]) for it in out.get(key) or []]
         out[key] = [it for it in out[key] if it["hunks"]]
