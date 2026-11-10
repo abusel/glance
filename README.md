@@ -35,7 +35,8 @@ The page shows static results immediately and fills in the model pass when it la
 The page is light on purpose. The first layer is only four things: **what it does** (the story in a few
 lines), **needs your call** (judgement calls, unenforced assumptions and serious flags, each one line until you
 open it), **data models** (a card per new or changed table/model; click one for its fields, what reads and
-writes it, and its code) and **understanding** (behavior changes and questions to check off). Every unit, file,
+writes it, and its code) and **understanding** (the few spots worth reading, with their code inline, plus behavior changes and
+questions to check off). Every unit, file,
 function, endpoint and lower-severity flag is **under the hood**, one click away, and anything that links to
 code opens it there. Two meters in the top bar, **Your calls** and **Understood**, say **Ready to merge** when
 both are full.

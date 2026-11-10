@@ -809,7 +809,7 @@ function decisionSettled(d) { const v = dverdicts[d.id] || {}; return v.v === "a
 // Reading every line isn't one of them: that's under the hood, for when you want it.
 function meters() {
   const calls = attentionItems();
-  const und = [...scenarioItems().map(s => s.rid), ...questionItems().map(q => q.rid)];
+  const und = [...(storyAI().read_first || []).map(spotKey), ...scenarioItems().map(s => s.rid), ...questionItems().map(q => q.rid)];
   return [
     { id: "calls", label: "Your calls", sec: "attention", done: calls.filter(x => x.settled()).length, total: calls.length },
     { id: "understood", label: "Understood", sec: "understand", done: und.filter(isChecked).length, total: und.length },
@@ -935,7 +935,7 @@ function sectionCounts() {
     overview: "",
     attention: att.filter(x => !x.settled()).length,
     models: modelNodes().length,
-    understand: scenarioItems().filter(inTopic).length + questionItems().filter(inTopic).length,
+    understand: (storyAI().read_first || []).length + scenarioItems().filter(inTopic).length + questionItems().filter(inTopic).length,
     hood: "",
     story: ((R.story || {}).units || []).filter(inTopic).length,
     relies: assumptionItems().filter(inTopic).length,
@@ -1655,14 +1655,17 @@ function renderUnderstand() {
   const llm = R.llm || {};
   const scs = scenarioItems().filter(inTopic);
   const qs = questionItems().filter(inTopic);
+  const units = Object.fromEntries(((R.story || {}).units || []).map(u => [u.id, u]));
+  const rf = readFirstCard(storyAI(), units);
   const out = [];
   if (llm.status === "running") out.push(h("div", { class: "card llm-state" }, h("span", { class: "spin" }), "Claude is working out what behaves differently and what you should be able to answer…"));
   else if (llm.status !== "ok") out.push(h("div", { class: "empty" }, "With the model pass: what behaves differently, as before/after cases you can run, and the questions you should be able to answer before merging."));
-  else if (!scs.length && !qs.length) out.push(h("div", { class: "empty" }, ("questions" in llm) ? "Nothing to check here for this change." : "This AI pass predates these checks. Re-run it to see them."));
-  if (scs.length || qs.length) out.push(h("div", { class: "dec-intro" }, "Check each one off when you get it. Behavior changes open into before/after cases you can run; answers stay hidden so you try first."));
-  if (scs.length) out.push(h("div", { class: "attn" }, scs.map(scenarioCard)));
+  else if (!scs.length && !qs.length && !rf) out.push(h("div", { class: "empty" }, ("questions" in llm) ? "Nothing to check here for this change." : "This AI pass predates these checks. Re-run it to see them."));
+  if (scs.length || qs.length || rf) out.push(h("div", { class: "dec-intro" }, "Check each one off when you get it: the few spots worth reading, what behaves differently (with cases you can run), and questions with the answers hidden so you try first."));
+  if (rf) out.push(rf);
+  if (scs.length) { if (rf) out.push(h("div", { class: "agroup" }, "What behaves differently")); out.push(h("div", { class: "attn" }, scs.map(scenarioCard))); }
   if (qs.length) {
-    if (scs.length) out.push(h("div", { class: "agroup" }, "Can you answer these?"));
+    if (scs.length || rf) out.push(h("div", { class: "agroup" }, "Can you answer these?"));
     const card = h("div", { class: "card" });
     qs.forEach((q, i) => card.append(questionRow(q, i)));
     out.push(card);
@@ -2154,8 +2157,6 @@ function renderStory() {
   const units = Object.fromEntries(st.units.map(u => [u.id, u]));
   const out = [];
 
-  const rf = readFirstCard(ai, units);
-  if (rf) out.push(rf);
 
   // chapters: the segments, each a click away
   let n = 0;
@@ -2219,7 +2220,7 @@ function readFirstCard(ai, units) {
   const routine = ((R.story || {}).units || []).filter(u => attentionOf(u).level === "routine").length;
   const card = h("div", { class: "card readfirst chap", id: "read-first" });
   card.append(h("div", { class: "chap-hd" }, h("span", { class: "num" }, "★"),
-    h("div", {}, h("h3", {}, `Read these ${spots.length} spots`), h("div", { class: "intro" }, `About ${lines} lines. This is where the change does something custom; the ${routine} routine items below are pre-checked.`)), h("span")));
+    h("div", {}, h("h3", {}, `Read these ${spots.length} spots`), h("div", { class: "intro" }, `About ${lines} lines. This is where the change does something custom; the other ${routine} routine items are under the hood.`)), h("span")));
   spots.forEach((sp, i) => {
     const u = units[sp.unit];
     const row = h("div", { class: "spot", id: "spot-" + i });
