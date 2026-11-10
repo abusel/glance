@@ -32,24 +32,28 @@ The page shows static results immediately and fills in the model pass when it la
 
 ## Understanding the change, not just reading it
 
-With the model pass, the page reads top to bottom as: the story → decisions → map → behavior → comprehension
-→ step by step. Three meters in the top bar track **Read**, **Decisions** and **Understood**; when all three
-are full it says **Ready to merge**.
+The page is light on purpose. The first layer is only four things: **what it does** (the story in a few
+lines), **needs your call** (judgement calls, unenforced assumptions and serious flags, each one line until you
+open it), **data models** (a card per new or changed table/model; click one for its fields, what reads and
+writes it, and its code) and **understanding** (behavior changes and questions to check off). Every unit, file,
+function, endpoint and lower-severity flag is **under the hood**, one click away, and anything that links to
+code opens it there. Two meters in the top bar, **Your calls** and **Understood**, say **Ready to merge** when
+both are full.
 
 - **Decisions**: the judgement calls in the change (chose / instead of / tradeoff / stakes). Agree, question or
   disagree; questions and disagreements stay open until you resolve them.
-- **Map**: new and changed routes, jobs, functions, schemas and tables in columns (entry → logic → shapes →
-  storage), with field-level diffs. Every line is a real reference in the code. Click a box to trace what it
+- **Map** (from Data models, "see how it all connects"): new and changed routes, jobs, functions, schemas and
+  tables in columns (entry → logic → shapes → storage), with field-level diffs. Every line is a real reference in the code. Click a box to trace what it
   touches; pick a flow to walk it step by step with the data's shape at each step.
 - **What behaves differently**: before/after tables of concrete inputs, boundary cases included. When a table
   maps to one function, **▶ Run before & after** calls it for real on the base commit and on your code (with
   the project's `.venv` Python, or node / `tsx`), flags rows where Claude's prediction is wrong, lets you edit
   inputs or add cases, and copies the cases as a test file. It runs your code locally, so anything Claude
   didn't mark pure asks first. The base commit is extracted to `~/.cache/glance/snapshots`, never into the repo.
-- **What this relies on**: assumptions the change makes (never null, runs once, rows already have X) and what
+- **Assumptions**: assumptions the change makes (never null, runs once, rows already have X) and what
   enforces each: a DB constraint, a guard, a type or a test. Claude must quote the enforcing code; glance finds
   that quote in the file and shows it as proof, or marks the claim "couldn't verify". For anything unenforced,
-  accept the risk or ask the agent to enforce it (counts toward Decisions).
+  accept the risk or ask the agent to enforce it (shows up in Needs your call).
 - **Can you answer these?**: questions you should be able to answer before merging, answers hidden.
 - **Copy feedback**: open questions, disagreements, flagged rows and ask-the-agent questions as one prompt.
 
@@ -69,8 +73,8 @@ glance --format json --stdout           # raw report
 glance serve                            # reopen the last report
 ```
 
-In the page: check items off as you review them (progress persists per branch), filter risks by severity,
-expand any item to its hunks, press **r** or **↻ Refresh** after you or an agent edits the code.
+In the page: make a call or check items off as you go (progress persists per branch), open any item for its
+detail and hunks, press **r** or **↻ Refresh** after you or an agent edits the code.
 
 Reports are written to `.glance/` (auto-added to `.git/info/exclude`, your `.gitignore` is untouched).
 
