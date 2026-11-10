@@ -451,3 +451,44 @@ def test_story_triage_defaults(py_report):
     units = py_report["story"]["units"]
     assert all(u["attention"] in ("read", "routine") and u["attention_why"] for u in units)
     assert all(u["attention"] == "read" for u in units if u["chapter"] in ("database", "routes"))
+
+
+def test_decisions_grounded_and_carried(py_report):
+    import copy
+
+    from glance.llm import attach_evidence, carry_over, ground
+
+    files = [f for f in py_report["files"] if f["hunks"]]
+    h1 = files[0]["hunks"][0]["id"]
+    uid = py_report["story"]["units"][0]["id"]
+    data = {"business_logic": [], "concerns": [], "walkthrough": [], "decisions": [
+        {"title": "Nightly check", "chose": "cron", "alternative": "on write", "tradeoff": "24h lag", "weight": "huge",
+         "hunks": [h1, "h_fake"], "units": [uid, "u_nope"]},
+        {"title": "Uncited", "chose": "x", "hunks": ["h_fake"]},
+        {"title": "", "hunks": [h1]},
+        "not a dict"]}
+    out, dropped = ground(data, {h1}, {uid})
+    assert dropped == 1
+    [d] = out["decisions"]
+    assert d["hunks"] == [h1] and d["units"] == [uid] and d["weight"] == "medium"
+
+    old = copy.deepcopy(py_report)
+    old["llm"] = attach_evidence({"status": "ok", **out}, old)
+    did = old["llm"]["decisions"][0]["id"]
+    assert did.startswith("d_") and old["llm"]["decisions"][0]["fingerprint"]
+    assert not carry_over(old, copy.deepcopy(py_report))["decisions"][0].get("stale")
+
+    new = copy.deepcopy(py_report)
+    for f in new["files"]:
+        for hk in f["hunks"]:
+            if hk["id"] == h1:
+                hk["lines"].append(["+", None, 999, "# changed"])
+    carried = carry_over(old, new)["decisions"][0]
+    assert carried["stale"] and carried["id"] == did
+
+    legacy = copy.deepcopy(old)
+    del legacy["llm"]["decisions"]
+    assert "decisions" not in carry_over(legacy, new)
+
+    assert "Decisions to agree with" in render({**py_report, "llm": old["llm"]})
+    assert '"decisions"' in llm.build_prompt(py_report)

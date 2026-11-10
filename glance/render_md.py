@@ -46,8 +46,21 @@ def render(report: dict[str, Any], max_items: int = 40) -> str:
             L.append(f"- ❌ missing: {m}")
         L.append("")
 
+    decisions = llm.get("decisions") or [] if llm.get("status") == "ok" else []
+    if decisions:
+        L.append("## Decisions to agree with")
+        for d in decisions:
+            L.append(f"- {SEV_ICON.get(d.get('weight'), '')} **{d['title']}**")
+            if d.get("chose"):
+                L.append(f"  - chose: {d['chose']}")
+            if d.get("alternative"):
+                L.append(f"  - instead of: {d['alternative']}")
+            if d.get("tradeoff"):
+                L.append(f"  - tradeoff: {d['tradeoff']}")
+        L.append("")
+
     risks = r["risks"]
-    concerns = llm.get("concerns") or [] if llm.get("status") == "ok" else []
+    concerns =llm.get("concerns") or [] if llm.get("status") == "ok" else []
     if risks or concerns:
         L.append("## Risks")
         for c in concerns:

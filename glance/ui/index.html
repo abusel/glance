@@ -137,6 +137,33 @@ section.sec > h2::after { order: 2; }
 .resolved h4 { margin: 0 0 4px; font-size: 12px; color: var(--add-ink); letter-spacing: .04em; text-transform: uppercase; }
 .resolved li { font-size: 13px; color: var(--muted); text-decoration: line-through; }
 
+/* ---------- decisions ---------- */
+.dec { padding: 0; scroll-margin-top: 90px; }
+.dec .dhd { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 13px 16px 11px; align-items: start; }
+.dec .dtitle { font-size: 15px; font-weight: 600; color: var(--ink); line-height: 1.4; }
+.dec .dmeta { display: flex; gap: 8px; align-items: center; margin-top: 4px; flex-wrap: wrap; }
+.dec .vbtns { display: flex; gap: 0; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.dec .vbtns button { border: 0; background: var(--panel); padding: 4px 10px; font-size: 12.5px; cursor: pointer; color: var(--muted); }
+.dec .vbtns button + button { border-left: 1px solid var(--line); }
+.dec .vbtns button:hover { color: var(--ink); background: var(--panel-2); }
+.dec .vbtns button.on.agree { color: var(--add-ink); background: var(--add-bg); font-weight: 600; }
+.dec .vbtns button.on.question { color: var(--med); background: var(--med-soft); font-weight: 600; }
+.dec .vbtns button.on.disagree { color: var(--high); background: var(--high-soft); font-weight: 600; }
+.dec .ba h5 { color: var(--muted); }
+.dec .trade { padding: 10px 16px; font-size: 13.5px; color: var(--ink); border-top: 1px solid var(--line-2); background: var(--panel-2); }
+.dec .trade h5 { margin: 0 0 3px; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); font-weight: 650; }
+.dec .dfoot { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 8px 16px; border-top: 1px solid var(--line-2); }
+.dec .dfoot .spacer { flex: 1; }
+.dec .dnote { padding: 0 16px 12px; }
+.dec .dnote textarea { width: 100%; min-height: 54px; font: 13.5px/1.5 var(--sans); color: var(--ink); background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; resize: vertical; }
+.dec .dnote textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.dec > .diff { border-top: 1px solid var(--line-2); }
+.dec.agreed:not(.peek) > :not(.dhd), .dec.agreed:not(.peek) .dmeta { display: none; }
+.dec.agreed:not(.peek) .dtitle { opacity: .55; font-size: 14px; }
+.dec.agreed:not(.peek) .dhd { cursor: pointer; padding-top: 9px; padding-bottom: 9px; }
+.dec-intro { color: var(--muted); font-size: 13px; margin: -4px 2px 12px; max-width: 80ch; }
+.dec-export { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; padding: 10px 16px; font-size: 13px; color: var(--ink-2); }
+
 /* ---------- intent ---------- */
 .intentcard .asked { display: block; line-height: 1.55; }
 .intent-text { color: var(--ink); white-space: pre-line; }
@@ -469,7 +496,12 @@ function reveal(el) {    // open whatever collapsed section/group hides el
 function toast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.classList.add("on"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("on"), 1800); }
 
 function storeKey() { return `glance:${R.repo_path}:${R.base.rev}:${R.head.ref}`; }
-function loadReviewed() { try { reviewed = JSON.parse(localStorage.getItem(storeKey()) || "{}") || {}; } catch { reviewed = {}; } }
+function loadReviewed() {
+  try { reviewed = JSON.parse(localStorage.getItem(storeKey()) || "{}") || {}; } catch { reviewed = {}; }
+  try { dverdicts = JSON.parse(localStorage.getItem(storeKey() + ":decisions") || "{}") || {}; } catch { dverdicts = {}; }
+}
+let dverdicts = {};                // decision id -> {v: "agree"|"question"|"disagree", note, at}
+function saveVerdicts() { try { localStorage.setItem(storeKey() + ":decisions", JSON.stringify(dverdicts)); } catch {} }
 function saveReviewed() { try { localStorage.setItem(storeKey(), JSON.stringify(reviewed)); } catch {} updateProgress(); }
 
 let DEFAULTS = {};                 // id -> pre-checked? (routine items, low risks)
@@ -532,6 +564,7 @@ function reviewables() {
   const ids = (storyAI().read_first || []).map(spotKey);
   ((R.story || {}).units || []).forEach(u => ids.push(unitKey(u)));
   riskItems().forEach(r => ids.push(r.id));
+  decisionItems().forEach(d => ids.push(d.rid));
   return [...new Set(ids)];
 }
 function updateProgress() {
@@ -629,7 +662,7 @@ function renderTop() {
 }
 
 const SECTIONS = [
-  ["overview", "Overview"], ["story", "Story"], ["risks", "Risks"], ["logic", "Business logic"], ["database", "Database"], ["schemas", "Schemas & types"],
+  ["overview", "Overview"], ["decisions", "Decisions"], ["story", "Story"], ["risks", "Risks"], ["logic", "Business logic"], ["database", "Database"], ["schemas", "Schemas & types"],
   ["interfaces", "Endpoints & tasks"], ["functions", "Functions"], ["files", "Files"],
 ];
 function sectionCounts() {
@@ -639,6 +672,7 @@ function sectionCounts() {
   const blTopic = b => topicOf({ file: HUNKS[(b.hunks || [])[0]]?.file });
   return {
     overview: "",
+    decisions: decisionItems().filter(inTopic).length,
     story: ((R.story || {}).units || []).filter(inTopic).length,
     risks: riskItems().filter(inTopic).length,
     logic: (llm.business_logic || []).filter(b => topicFilter === "all" || blTopic(b) === topicFilter).length + ch.filter(c => ["config", "agent"].includes(c.kind) && c.status !== "removed").length,
@@ -737,6 +771,102 @@ function renderOverview() {
     out.push(h("div", { style: "height:10px" }), wc);
   }
   return secEl("overview", "Overview", ...out);
+}
+
+// ------------------------------------------------------------------ decisions
+// The judgement calls in the change. A reviewer has to say agree / question / disagree on each one, which is the
+// point: skimming code lets you approve a design choice without noticing it was made.
+function decisionItems() {
+  const llm = R.llm || {};
+  if (llm.status !== "ok") return [];
+  return (llm.decisions || []).map(d => {
+    const first = HUNKS[(d.hunks || [])[0]];
+    return { ...d, rid: "d:" + d.id, file: first?.file, line: first?.hunk.new_start, topic: topicOf({ file: first?.file }) };
+  });
+}
+const VERDICTS = [["agree", "Agree"], ["question", "Question"], ["disagree", "Disagree"]];
+function setVerdict(d, v, card) {
+  const cur = dverdicts[d.id] || {};
+  if (cur.v === v) delete dverdicts[d.id];                       // click again to clear
+  else dverdicts[d.id] = { ...cur, v, at: new Date().toISOString().slice(0, 16).replace("T", " ") };
+  reviewed[d.rid] = dverdicts[d.id] ? 1 : 0;
+  saveVerdicts(); saveReviewed();
+  card.replaceWith(decisionCard(d));
+  drawDecisionExport();
+}
+function decisionCard(d) {
+  const units = Object.fromEntries(((R.story || {}).units || []).map(u => [u.id, u]));
+  const dv = dverdicts[d.id] || {};
+  const card = h("div", { class: "card dec" + (dv.v === "agree" ? " agreed" : ""), id: "dec-" + d.id });
+  card.dataset.rid = d.rid;
+  const btns = h("div", { class: "vbtns", title: "Your call on this decision (click again to clear)" }, VERDICTS.map(([v, label]) =>
+    h("button", { class: v + (dv.v === v ? " on" : ""), onclick: e => { e.stopPropagation(); setVerdict(d, v, card); } }, label)));
+  const meta = h("div", { class: "dmeta" }, h("span", { class: "sev " + d.weight, title: "How much it costs if this choice is wrong" }, d.weight + " stakes"));
+  if (d.stale) meta.append(h("span", { class: "verdict stale", title: "The code behind this decision changed since Claude described it" }, dv.v ? "code changed since your call" : "code changed"));
+  const hd = h("div", { class: "dhd" }, h("div", {}, h("div", { class: "dtitle" }, d.title), meta), btns);
+  hd.addEventListener("click", e => { if (card.classList.contains("agreed") && !e.target.closest("button")) card.classList.toggle("peek"); });
+  card.append(hd);
+  card.append(h("div", { class: "ba" }, h("div", {}, h("h5", {}, "Chose"), d.chose || "—"), h("div", {}, h("h5", {}, "Instead of"), d.alternative || "—")));
+  if (d.tradeoff) card.append(h("div", { class: "trade" }, h("h5", {}, "Tradeoff"), d.tradeoff));
+  const foot = h("div", { class: "dfoot" });
+  for (const id of d.units || []) if (units[id]) foot.append(h("span", { class: "chip", title: "Jump to " + units[id].name, onclick: () => jumpUnit(id) }, units[id].name));
+  const t = codeToggle(foot, d.hunks, "show code");
+  foot.append(h("span", { class: "spacer" }), t || h("span"), loc(d.file, d.line) || h("span"));
+  card.append(foot);
+  if (dv.v === "question" || dv.v === "disagree") {
+    const ta = h("textarea", { placeholder: dv.v === "question" ? "What do you want to know? (goes into the feedback you can copy for the agent)" : "What should it do instead, and why?" });
+    ta.value = dv.note || "";
+    ta.addEventListener("input", () => { dverdicts[d.id].note = ta.value; saveVerdicts(); drawDecisionExport(); });
+    card.append(h("div", { class: "dnote" }, ta));
+  }
+  return card;
+}
+function decisionFeedback() {
+  const open = decisionItems().filter(d => ["question", "disagree"].includes((dverdicts[d.id] || {}).v));
+  if (!open.length) return "";
+  const L = ["Review feedback on the design decisions in this change:", ""];
+  open.forEach((d, i) => {
+    const dv = dverdicts[d.id];
+    L.push(`${i + 1}. ${dv.v === "disagree" ? "DISAGREE" : "QUESTION"}: ${d.title}`);
+    if (d.chose) L.push(`   You chose: ${d.chose}`);
+    if (d.alternative) L.push(`   Alternative: ${d.alternative}`);
+    if (dv.note && dv.note.trim()) L.push(`   Reviewer: ${dv.note.trim()}`);
+    const where = [...new Set((d.hunks || []).map(hid => HUNKS[hid] && `${HUNKS[hid].file}:${HUNKS[hid].hunk.new_start}`).filter(Boolean))];
+    if (where.length) L.push(`   Where: ${where.join(", ")}`);
+    L.push("");
+  });
+  L.push(open.some(d => dverdicts[d.id].v === "disagree") ? "Please address the disagreements (or explain why the current choice is right) and answer the questions." : "Please answer the questions; change the code only if the answer shows a problem.");
+  return L.join("\n");
+}
+function drawDecisionExport() {
+  const box = document.getElementById("dec-export");
+  if (!box) return;
+  const items = decisionItems();
+  const n = v => items.filter(d => (dverdicts[d.id] || {}).v === v).length;
+  const open = n("question") + n("disagree");
+  box.innerHTML = "";
+  box.append(h("span", {}, `${n("agree")}/${items.length} agreed`, n("question") ? ` · ${n("question")} questioned` : "", n("disagree") ? ` · ${n("disagree")} disagreed` : ""));
+  if (open) box.append(h("span", { style: "flex:1" }), h("button", { class: "btn ai", title: "Copy your questions and disagreements as a prompt for the agent that wrote this", onclick: async () => {
+    try { await navigator.clipboard.writeText(decisionFeedback()); toast("Feedback copied — paste it to the agent"); } catch { toast("Couldn't copy to the clipboard"); }
+  } }, `Copy feedback for the agent (${open})`));
+}
+function renderDecisions() {
+  const llm = R.llm || {};
+  const items = decisionItems().filter(inTopic);
+  const out = [];
+  if (llm.status === "running") out.push(h("div", { class: "card llm-state" }, h("span", { class: "spin" }), "Claude is finding the judgement calls in this change…"));
+  else if (llm.status !== "ok") out.push(h("div", { class: "empty" }, "With the model pass, the design decisions in this change show up here for you to agree with, question or push back on."));
+  else if (!(llm.decisions || []).length) out.push(h("div", { class: "empty" }, llm.carried && !("decisions" in llm) ? "This AI pass predates decision cards. Re-run it to see them." : "No real judgement calls found: this change looks mechanical."));
+  else if (!items.length) out.push(h("div", { class: "empty" }, "No decisions in this topic."));
+  else {
+    out.push(h("div", { class: "dec-intro" }, "The choices where a competent engineer could have gone another way. Make a call on each one; anything you question or disagree with becomes feedback you can hand back to the agent."));
+    const order = { high: 0, medium: 1, low: 2 };
+    items.sort((a, b) => order[a.weight] - order[b.weight]).forEach(d => out.push(decisionCard(d)));
+    out.push(h("div", { class: "card dec-export", id: "dec-export" }));
+  }
+  const sec = secEl("decisions", "Decisions", ...out);
+  setTimeout(drawDecisionExport);
+  return sec;
 }
 
 function riskItems() {
@@ -1313,7 +1443,7 @@ function render() {
   const y = window.scrollY;
   main.innerHTML = "";
   if (R.errors && R.errors.length) main.append(h("div", { class: "card", style: "padding:10px 16px;margin-bottom:16px;color:var(--high);font-size:13px" }, R.errors.join("\n")));
-  main.append(renderOverview(), renderStory(), renderRisks(), renderLogic(), renderLayer("database"), renderLayer("schemas"), renderInterfaces(), renderFunctions(), renderFiles());
+  main.append(renderOverview(), renderDecisions(), renderStory(), renderRisks(), renderLogic(), renderLayer("database"), renderLayer("schemas"), renderInterfaces(), renderFunctions(), renderFiles());
   updateBack();
   syncGroups();
   window.scrollTo(0, y);

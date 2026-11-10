@@ -40,6 +40,23 @@ Rules:
   return "intent": null. Never infer the task from commit messages or branch names.
 - Be terse. Plain English. No markdown inside strings.
 
+Decisions are the judgement calls in this change: places where a competent engineer could reasonably have gone
+another way, and the choice has consequences a reviewer should consciously agree to. Reviewers skim code and
+approve it without noticing these, so surface them. Look for: how data is modeled (new table vs. column, JSON
+blob vs. columns, denormalized copies, nullable vs. default, enum vs. string), sync vs. background work, where
+validation or authorization lives, error handling and retry strategy (fail, swallow, retry, partial writes),
+idempotency and concurrency, caching, what is computed on write vs. on read, library or API choices, what was
+left out of scope, and behavior at boundaries. For each:
+- title: the choice as a short claim ("Margin is checked nightly, not on each trade").
+- chose: what the code does, concretely.
+- alternative: the most plausible other way to do it (a real option, not a straw man).
+- tradeoff: what this choice gains and what it costs or risks, concretely (when does it bite, who notices).
+- weight: "high" if getting it wrong costs money, data, security or a painful migration later; "medium" if it
+  shapes future work; "low" otherwise.
+- hunks: the hunk ids where the choice is made. units: the story unit ids involved (may be empty).
+Not decisions: naming, formatting, following an existing pattern in the codebase, anything with only one sane
+answer. 0-6 decisions, most consequential first; zero is fine for a mechanical change.
+
 The "story" explains the change the way a teammate would walk someone through a feature: first the goal, then
 the records we store, then the routes that touch them, then the schemas those routes use, then the background
 work. Static analysis already sorted the change into "Story units" (listed below, ids like "u3"); you write
@@ -69,6 +86,8 @@ Return ONLY a JSON object, no prose, matching:
   "business_logic": [{"title": "...", "before": "...", "after": "...", "why_it_matters": "...", "hunks": ["h_..."]}],
   "concerns": [{"severity": "high|medium|low", "title": "...", "detail": "...", "hunks": ["h_..."]}],
   "walkthrough": [{"step": "short sentence on what to read and why", "hunks": ["h_..."]}],
+  "decisions": [{"title": "...", "chose": "...", "alternative": "...", "tradeoff": "...", "weight": "high|medium|low",
+                 "hunks": ["h_..."], "units": ["u.."]}],
   "story": {"goal": "...", "how_it_works": [{"text": "...", "units": ["u1", "u4"]}],
             "chapters": {"database": "...", "routes": "...", "schemas": "...", "background": "...", "supporting": "..."},
             "units": {"u1": {"what": "...", "why": "...", "attention": "read|routine", "read_reason": "..."}},
@@ -220,6 +239,8 @@ def ground(result: dict, valid: set[str], units: set[str] | None = None, hunk_in
     result["business_logic"] = keep(result.get("business_logic"))
     result["concerns"] = keep(result.get("concerns"))
     result["walkthrough"] = keep(result.get("walkthrough"))
+    raw_decisions = [d for d in result.get("decisions") or [] if isinstance(d, dict)]
+    result["decisions"] = ground_decisions(keep(raw_decisions), units or set())
     intent = result.get("intent")
     if isinstance(intent, dict):
         extra = []
@@ -236,9 +257,35 @@ def ground(result: dict, valid: set[str], units: set[str] | None = None, hunk_in
     return result, dropped
 
 
+def _decision_id(d: dict) -> str:
+    return "d_" + hashlib.sha1(f"{d.get('title')}|{d.get('chose')}".encode()).hexdigest()[:10]
+
+
+def ground_decisions(items: list, units: set[str]) -> list[dict]:
+    """Decisions arrive already filtered to ones citing real hunks; normalise fields and cap the list."""
+    out = []
+    for d in items:
+        if not str(d.get("title") or "").strip():
+            continue
+        out.append({
+            "title": str(d["title"]).strip()[:200],
+            "chose": str(d.get("chose") or "").strip()[:600],
+            "alternative": str(d.get("alternative") or "").strip()[:600],
+            "tradeoff": str(d.get("tradeoff") or "").strip()[:800],
+            "weight": d.get("weight") if d.get("weight") in ("high", "medium", "low") else "medium",
+            "hunks": d["hunks"],
+            "units": [u for u in d.get("units") or [] if u in units],
+        })
+    return out[:6]
+
+
 def attach_evidence(result: dict, report: dict) -> dict:
-    """Give each concern a stable id, its files, and the cited code, so it can be re-checked after edits."""
+    """Give each concern a stable id, its files, and the cited code, so it can be re-checked after edits.
+    Decisions get a stable id and a fingerprint too, so a reviewer's verdict can be flagged when the code moves."""
     hunks = {h["id"]: (f["path"], h) for f in report["files"] for h in f["hunks"]}
+    for d in result.get("decisions") or []:
+        d["id"] = _decision_id(d)
+        d["fingerprint"] = {hid: _hunk_print(hunks[hid][1]) for hid in d["hunks"] if hid in hunks}
     for c in result.get("concerns") or []:
         c["id"] = "c_" + hashlib.sha1(f"{c.get('title')}|{c.get('detail')}".encode()).hexdigest()[:10]
         c["files"] = sorted({hunks[h][0] for h in c["hunks"] if h in hunks})
@@ -276,6 +323,14 @@ def carry_over(old: dict, new: dict) -> dict:
         if len(kept) < len(c.get("hunks") or []) or edited:
             c["stale"] = True
         c["hunks"] = kept
+    for d in out.get("decisions") or []:
+        d.setdefault("id", _decision_id(d))
+        kept = [h for h in d.get("hunks") or [] if h in valid]
+        if len(kept) < len(d.get("hunks") or []) or any(prints.get(h) != fp for h, fp in (d.get("fingerprint") or {}).items()):
+            d["stale"] = True          # the code behind this choice changed since the reviewer saw it
+        d["hunks"] = kept
+    if "decisions" in out:             # absent = an AI pass from before decision cards existed
+        out["decisions"] = [d for d in out["decisions"] if d["hunks"]]
     for key in ("business_logic", "walkthrough"):
         out[key] = [dict(it, hunks=[h for h in it.get("hunks") or [] if h in valid]) for it in out.get(key) or []]
         out[key] = [it for it in out[key] if it["hunks"]]
