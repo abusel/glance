@@ -615,3 +615,42 @@ def test_probe_endpoint(tmp_path, monkeypatch):
         assert c.getresponse().status == 404
     finally:
         srv.shutdown()
+
+
+def test_assumptions_are_verified_against_the_code(py_report):
+    import copy
+
+    from glance.llm import attach_evidence, carry_over, ground
+
+    h1 = next(f for f in py_report["files"] if f["hunks"])["hunks"][0]["id"]
+    data = {"business_logic": [], "concerns": [], "walkthrough": [], "assumptions": [
+        {"text": "Principal is positive", "breaks": "negative loans get priced", "hunks": [h1], "enforced": "none", "evidence": None},
+        {"text": "Rate is computed from principal", "breaks": "x", "hunks": [h1], "enforced": "code",
+         "evidence": {"file": "app/services/rates.py", "line": 9, "quote": "if principal < 50_000", "note": "branches on principal"}},
+        {"text": "Wrong line, right quote", "breaks": "x", "hunks": [h1], "enforced": "db",
+         "evidence": {"file": "app/models.py", "line": 15, "quote": 'ForeignKey("accounts.id")'}},
+        {"text": "Quote not in file", "breaks": "x", "hunks": [h1], "enforced": "db",
+         "evidence": {"file": "app/models.py", "line": 15, "quote": "CheckConstraint('principal > 0')"}},
+        {"text": "No quote", "breaks": "x", "hunks": [h1], "enforced": "code", "evidence": {"file": "app/models.py", "line": 15}},
+        {"text": "Covered by a test", "breaks": "x", "hunks": [h1], "enforced": "test",
+         "evidence": {"file": "app/services/rates.py", "line": 1, "test": "test_does_not_exist"}},
+        {"text": "File is made up", "breaks": "x", "hunks": [h1], "enforced": "db", "evidence": {"file": "nope.py", "line": 1}},
+        {"text": "Uncited", "hunks": [], "enforced": "none"}]}
+    out, dropped = ground(data, {h1}, set())
+    assert dropped == 1
+    res = attach_evidence({"status": "ok", **out}, py_report)
+    st = {a["text"]: a for a in res["assumptions"]}
+    assert st["Principal is positive"]["status"] == "none"
+    good = st["Rate is computed from principal"]
+    assert good["status"] == "enforced" and good["evidence"]["line"] == 5 and "50_000" in "".join(good["snippet"]["lines"])
+    moved = st["Wrong line, right quote"]
+    assert moved["status"] == "enforced" and 'ForeignKey("accounts.id")' in moved["snippet"]["lines"][moved["evidence"]["line"] - moved["snippet"]["from"]]
+    assert st["Quote not in file"]["status"] == "unverified" and st["No quote"]["status"] == "unverified"
+    assert st["Covered by a test"]["status"] == "unverified" and "test_does_not_exist" in st["Covered by a test"]["why_unverified"]
+    assert st["File is made up"]["status"] == "unverified"
+
+    old = copy.deepcopy(py_report)
+    old["llm"] = res
+    assert {a["status"] for a in carry_over(old, copy.deepcopy(py_report))["assumptions"]} == {"none", "enforced", "unverified"}
+    md = render({**py_report, "llm": res})
+    assert "What this relies on" in md and "nothing enforces this" in md and "couldn't verify" in md

@@ -46,6 +46,10 @@ are full it says **Ready to merge**.
   the project's `.venv` Python, or node / `tsx`), flags rows where Claude's prediction is wrong, lets you edit
   inputs or add cases, and copies the cases as a test file. It runs your code locally, so anything Claude
   didn't mark pure asks first. The base commit is extracted to `~/.cache/glance/snapshots`, never into the repo.
+- **What this relies on**: assumptions the change makes (never null, runs once, rows already have X) and what
+  enforces each: a DB constraint, a guard, a type or a test. Claude must quote the enforcing code; glance finds
+  that quote in the file and shows it as proof, or marks the claim "couldn't verify". For anything unenforced,
+  accept the risk or ask the agent to enforce it (counts toward Decisions).
 - **Can you answer these?**: questions you should be able to answer before merging, answers hidden.
 - **Copy feedback**: open questions, disagreements, flagged rows and ask-the-agent questions as one prompt.
 

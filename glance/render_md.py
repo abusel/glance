@@ -83,6 +83,21 @@ def render(report: dict[str, Any], max_items: int = 40) -> str:
                 L.append(f"| {cell(row['case'])} | {cell(row['before'])} | {after} |")
             L.append("")
 
+    assumptions = llm.get("assumptions") or [] if llm.get("status") == "ok" else []
+    if assumptions:
+        L.append("## What this relies on")
+        word = {"db": "database constraint", "code": "checked in code", "type": "the type system", "test": "a test"}
+        for a in assumptions:
+            ev = a.get("evidence") or {}
+            if a.get("status") == "enforced":
+                mark = f"✅ enforced by {word.get(a.get('claimed'), 'code')} (`{ev.get('file')}:{ev.get('line')}`)"
+            elif a.get("status") == "unverified":
+                mark = "❓ claimed enforced, couldn't verify"
+            else:
+                mark = "⚠️ nothing enforces this"
+            L.append(f"- **{a['text']}** — {mark}" + (f"  \n  If it's false: {a['breaks']}" if a.get("breaks") and a.get("status") != "enforced" else ""))
+        L.append("")
+
     questions = llm.get("questions") or [] if llm.get("status") == "ok" else []
     if questions:
         L.append("## Can you answer these before merging?")

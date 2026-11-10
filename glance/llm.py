@@ -76,6 +76,22 @@ and what happens before and after this change:
   clock. Otherwise "target": null. The reviewer can run these rows against the old and new code.
 Skip scenarios for pure refactors, plumbing and CRUD with no rules.
 
+Assumptions are what this change relies on being true that the diff itself doesn't guarantee: about inputs
+(never null, positive, unique), data already in the database (existing rows have a currency, no duplicates),
+ordering and concurrency (runs once, after X, one worker at a time), the environment (env var set, a service is
+up) and other systems (webhook is idempotent, API never returns an empty list). List 0-8, most dangerous first.
+For each one, LOOK in the repository (Read / Grep the models, migrations, validators, callers and tests) for
+what enforces it: a database constraint (NOT NULL, UNIQUE, FOREIGN KEY, CHECK), a guard or validation in code,
+a type that makes the bad case impossible, or a test that covers the bad case. Be strict: it is enforced only if
+you found the line. A comment, a docstring, a default value that callers can override, or "callers probably
+don't do that" is not enforcement.
+{"text": "the assumption, as a plain claim", "breaks": "what goes wrong if it's false, concretely",
+ "hunks": ["h_..." where the change relies on it], "enforced": "db" | "code" | "type" | "test" | "none",
+ "evidence": {"file": "path/in/repo", "line": N, "quote": "the enforcing code on that line, copied verbatim
+ (e.g. ForeignKey(\"accounts.id\")), required unless it's a test", "test": "test function name if a test",
+ "note": "what that line does"} | null}
+glance checks every claim against the file: the quote must be on or near that line, and a test name must exist.
+
 Flows trace data through the change end to end, so a reviewer sees how the pieces connect. Write 1-4 flows,
 one per distinct path (e.g. "Create a loan", "Nightly margin sweep"). Use the "Data map edges" below: they are
 the real references between units. Each flow is {"title": "...", "trigger": "what starts it (a request, a
@@ -126,6 +142,8 @@ Return ONLY a JSON object, no prose, matching:
                  "target": {"file": "...", "function": "...", "pure": true} | null,
                  "rows": [{"case": "...", "input": {} | null, "before": "...", "after": "..."}]}],
   "questions": [{"q": "...", "answer": "...", "hunks": ["h_..."]}],
+  "assumptions": [{"text": "...", "breaks": "...", "hunks": ["h_..."], "enforced": "db|code|type|test|none",
+                   "evidence": {"file": "...", "line": 0, "quote": "...", "test": "...", "note": "..."} | null}],
   "flows": [{"title": "...", "trigger": "...", "steps": [{"unit": "u..", "text": "...", "data": "..."}]}],
   "story": {"goal": "...", "how_it_works": [{"text": "...", "units": ["u1", "u4"]}],
             "chapters": {"database": "...", "routes": "...", "schemas": "...", "background": "...", "supporting": "..."},
@@ -289,6 +307,7 @@ def ground(result: dict, valid: set[str], units: set[str] | None = None, hunk_in
     result["scenarios"] = ground_scenarios(keep(result.get("scenarios")), units or set())
     result["questions"] = ground_questions(keep(result.get("questions")))
     result["flows"] = ground_flows(result.get("flows"), units or set())
+    result["assumptions"] = ground_assumptions(keep(result.get("assumptions")))
     intent = result.get("intent")
     if isinstance(intent, dict):
         extra = []
@@ -367,6 +386,90 @@ def ground_questions(items: list) -> list[dict]:
     return out[:8]
 
 
+ENFORCED = ("db", "code", "type", "test")
+
+
+def ground_assumptions(items: list) -> list[dict]:
+    out = []
+    for a in items:
+        text = str(a.get("text") or "").strip()
+        if not text:
+            continue
+        ev = a.get("evidence") if isinstance(a.get("evidence"), dict) else None
+        claimed = a.get("enforced") if a.get("enforced") in ENFORCED else "none"
+        out.append({"id": "a_" + hashlib.sha1(text.encode()).hexdigest()[:10], "text": text[:300],
+                    "breaks": str(a.get("breaks") or "").strip()[:400], "hunks": a["hunks"], "claimed": claimed,
+                    "evidence": {"file": str(ev.get("file") or "").strip(), "line": ev.get("line"), "test": str(ev.get("test") or "").strip()[:120],
+                                 "quote": str(ev.get("quote") or "").strip()[:200],
+                                 "note": str(ev.get("note") or "").strip()[:300]} if ev and claimed != "none" else None})
+    return out[:8]
+
+
+def _head_text(report: dict, path: str) -> str | None:
+    """A file as it is in the code under review."""
+    repo = Path(report["repo_path"])
+    if not path or ".." in Path(path).parts or path.startswith("/"):
+        return None
+    if report["head"].get("worktree"):
+        fp = repo / path
+        try:
+            return fp.read_text(errors="replace") if fp.is_file() else None
+        except OSError:
+            return None
+    from .git import git
+    out = git(repo, "show", f"{report['head']['rev']}:{path}", check=False)
+    return out or None
+
+
+def verify_assumptions(items: list[dict], report: dict) -> list[dict]:
+    """Check each "it's enforced here" claim against the real file: the line exists (and a cited test name is in
+    the file), and attach the snippet so the reviewer sees the proof. A claim we can't confirm is "unverified",
+    never "enforced"."""
+    for a in items:
+        ev = a.get("evidence")
+        a["status"] = "none"
+        a.pop("snippet", None)
+        if a.get("claimed", "none") == "none" or not ev:
+            continue
+        text = _head_text(report, ev.get("file") or "")
+        a["status"] = "unverified"
+        if text is None:
+            a["why_unverified"] = f"{ev.get('file') or 'no file'} isn't in the code under review"
+            continue
+        lines = text.splitlines()
+        try:
+            ln = int(ev.get("line") or 0)
+        except (TypeError, ValueError):
+            ln = 0
+        squash = lambda x: re.sub(r"\s+", "", x)
+        if ev.get("quote"):
+            # the quoted code must really be in the file; trust where it is, not the line number we were given
+            q = squash(ev["quote"])
+            hits = [i + 1 for i, l in enumerate(lines) if q and q in squash(l)]
+            if not hits and q:   # a quote that spans lines
+                joined = [squash("".join(lines[i:i + 4])) for i in range(len(lines))]
+                hits = [i + 1 for i, j in enumerate(joined) if q in j]
+            if not hits:
+                a["why_unverified"] = f"the quoted code isn't in {ev['file']}"
+                continue
+            ln = min(hits, key=lambda x: abs(x - ln)) if ln else hits[0]
+        elif ev.get("test"):
+            hit = next((i + 1 for i, l in enumerate(lines) if re.search(rf"\b{re.escape(ev['test'])}\b", l)), 0)
+            if not hit:
+                a["why_unverified"] = f"no test named {ev['test']} in {ev['file']}"
+                continue
+            ln = hit
+        else:
+            a["why_unverified"] = "no code was quoted to back it up"
+            continue
+        ev["line"] = ln
+        lo, hi = max(1, ln - 2), min(len(lines), ln + 3)
+        a["snippet"] = {"from": lo, "lines": lines[lo - 1:hi], "at": ln}
+        a["status"] = "enforced"
+        a.pop("why_unverified", None)
+    return items
+
+
 def ground_flows(items: Any, units: set[str]) -> list[dict]:
     """Flows cite story units, not hunks: keep steps on real units, keep flows with at least two of them."""
     out = []
@@ -388,10 +491,11 @@ def attach_evidence(result: dict, report: dict) -> dict:
     hunks = {h["id"]: (f["path"], h) for f in report["files"] for h in f["hunks"]}
     for d in result.get("decisions") or []:
         d["id"] = _decision_id(d)
+    verify_assumptions(result.get("assumptions") or [], report)
     from .probe import resolve_target
     for sc in result.get("scenarios") or []:
         sc["target"] = resolve_target(sc, report)     # checked against the real change, or None
-    for key in ("decisions", "scenarios", "questions"):
+    for key in ("decisions", "scenarios", "questions", "assumptions"):
         for d in result.get(key) or []:
             d["fingerprint"] = {hid: _hunk_print(hunks[hid][1]) for hid in d["hunks"] if hid in hunks}
     for c in result.get("concerns") or []:
@@ -431,7 +535,7 @@ def carry_over(old: dict, new: dict) -> dict:
         if len(kept) < len(c.get("hunks") or []) or edited:
             c["stale"] = True
         c["hunks"] = kept
-    for key in ("decisions", "scenarios", "questions"):
+    for key in ("decisions", "scenarios", "questions", "assumptions"):
         if key not in out:             # absent = an AI pass from before this feature existed
             continue
         for d in out[key]:
@@ -455,6 +559,8 @@ def carry_over(old: dict, new: dict) -> dict:
         st["how_it_works"] = [s2 for s2 in st["how_it_works"] if s2["units"]]
         st["read_first"] = [dict(sp, unit=remap[sp["unit"]]) for sp in st.get("read_first") or []
                             if sp.get("unit") in remap and sp.get("hunk") in valid]
+    if "assumptions" in out:
+        verify_assumptions(out["assumptions"], new)     # the proof may have moved or gone since
     if "flows" in out:
         flows = []
         for f in out["flows"]:

@@ -287,6 +287,28 @@ table.sc input.inpbox, .addcase input { width: 100%; font: 11.5px var(--mono); c
 .btn.run { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 @media (max-width: 900px) { .addcase { grid-template-columns: 1fr; } }
 
+/* ---------- assumptions ---------- */
+.arow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 14px; padding: 12px 16px; border-top: 1px solid var(--line-2); align-items: start; }
+.arow:first-child { border-top: 0; }
+.arow .at { font-size: 14.5px; color: var(--ink); font-weight: 560; }
+.arow .ab { font-size: 13px; color: var(--ink-2); margin-top: 3px; }
+.arow .ab b { color: var(--muted); font-weight: 600; }
+.arow .ameta { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.arow .anote { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.arow .anote input:not(.chk) { width: 100%; font: 13px var(--sans); color: var(--ink); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; }
+.arow > .diff, .arow > .snip { grid-column: 1 / -1; }
+.abadge { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding: 1px 7px; border-radius: 4px; }
+.abadge.none { color: var(--high); background: var(--high-soft); } .abadge.unverified { color: var(--med); background: var(--med-soft); } .abadge.enforced { color: var(--add-ink); background: var(--add-bg); }
+.arow.settled:not(.peek) .ab, .arow.settled:not(.peek) .ameta, .arow.settled:not(.peek) .anote, .arow.settled:not(.peek) > .diff { display: none; }
+.arow.settled:not(.peek) .at { opacity: .55; font-weight: 400; }
+.arow.settled:not(.peek) { cursor: pointer; padding-top: 8px; padding-bottom: 8px; }
+.snip { margin: 6px 0 0; border: 1px solid var(--line-2); border-radius: 6px; overflow: auto; font: 12px/1.55 var(--mono); background: var(--panel-2); }
+.snip div { display: grid; grid-template-columns: 44px 1fr; white-space: pre; }
+.snip div span:first-child { color: var(--faint); text-align: right; padding-right: 10px; user-select: none; }
+.snip div.hit { background: var(--add-bg); }
+.agroup { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); font-weight: 650; margin: 16px 2px 6px; }
+.agroup:first-of-type { margin-top: 4px; }
+
 /* ---------- comprehension ---------- */
 .qrow { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--line-2); align-items: start; }
 .qrow:first-child { border-top: 0; }
@@ -641,9 +663,12 @@ function loadReviewed() {
   try { dverdicts = JSON.parse(localStorage.getItem(storeKey() + ":decisions") || "{}") || {}; } catch { dverdicts = {}; }
   try { flags = JSON.parse(localStorage.getItem(storeKey() + ":flags") || "{}") || {}; } catch { flags = {}; }
   try { probeEdits = JSON.parse(localStorage.getItem(storeKey() + ":probes") || "{}") || {}; } catch { probeEdits = {}; }
+  try { averdicts = JSON.parse(localStorage.getItem(storeKey() + ":assumptions") || "{}") || {}; } catch { averdicts = {}; }
 }
 let dverdicts = {};                // decision id -> {v: "agree"|"question"|"disagree", note, at, resolved}
 let flags = {};                    // "row:<scenario>:<i>" | "q:<question>" -> {note}: things to ask the agent about
+let averdicts = {};                // assumption id -> {v: "accept"|"ask", note, resolved}
+function saveAverdicts() { try { localStorage.setItem(storeKey() + ":assumptions", JSON.stringify(averdicts)); } catch {} updateProgress(); updateFeedback(); }
 let probeEdits = {};               // scenario id -> {rows: {i: input}, extra: [{case, input}]}: your inputs, kept per branch
 const probeRuns = {}, probeBusy = {}, probeOK = new Set();   // results live for this page only: re-running is cheap
 function saveProbeEdits() { try { localStorage.setItem(storeKey() + ":probes", JSON.stringify(probeEdits)); } catch {} }
@@ -719,10 +744,11 @@ function decisionSettled(d) { const v = dverdicts[d.id] || {}; return v.v === "a
 function meters() {
   const ids = reviewables();
   const ds = decisionItems();
+  const as = assumptionItems().filter(needsCall);
   const und = [...scenarioItems().map(s => s.rid), ...questionItems().map(q => q.rid)];
   return [
     { id: "read", label: "Read", sec: "story", done: ids.filter(isChecked).length, total: ids.length },
-    { id: "decisions", label: "Decisions", sec: "decisions", done: ds.filter(decisionSettled).length, total: ds.length },
+    { id: "decisions", label: "Decisions", sec: "decisions", done: ds.filter(decisionSettled).length + as.filter(assumptionSettled).length, total: ds.length + as.length },
     { id: "understood", label: "Understood", sec: "understand", done: und.filter(isChecked).length, total: und.length },
   ];
 }
@@ -835,7 +861,7 @@ function renderTop() {
 }
 
 const SECTIONS = [
-  ["overview", "Overview"], ["decisions", "Decisions"], ["map", "Map"], ["behavior", "Behavior"], ["understand", "Comprehension"], ["story", "Step by step"], ["risks", "Risks"], ["logic", "Business logic"], ["database", "Database"], ["schemas", "Schemas & types"],
+  ["overview", "Overview"], ["decisions", "Decisions"], ["map", "Map"], ["behavior", "Behavior"], ["relies", "Assumptions"], ["understand", "Comprehension"], ["story", "Step by step"], ["risks", "Risks"], ["logic", "Business logic"], ["database", "Database"], ["schemas", "Schemas & types"],
   ["interfaces", "Endpoints & tasks"], ["functions", "Functions"], ["files", "Files"],
 ];
 function sectionCounts() {
@@ -848,6 +874,7 @@ function sectionCounts() {
     decisions: decisionItems().filter(inTopic).length,
     map: mapNodes().length,
     behavior: scenarioItems().filter(inTopic).length,
+    relies: assumptionItems().filter(inTopic).length,
     understand: questionItems().filter(inTopic).length + decisionItems().filter(d => ["question", "disagree"].includes((dverdicts[d.id] || {}).v)).length,
     story: ((R.story || {}).units || []).filter(inTopic).length,
     risks: riskItems().filter(inTopic).length,
@@ -1030,6 +1057,17 @@ function feedbackText() {
     if (where(sc.hunks)) L.push(`Where: ${where(sc.hunks)}`);
     items.push(L);
   });
+  for (const a of assumptionItems()) {
+    const av = averdicts[a.id] || {};
+    if (av.v !== "ask" || av.resolved) continue;
+    const L = [`ENFORCE AN ASSUMPTION: ${a.text}`];
+    if (a.breaks) L.push(`If it's false: ${a.breaks}`);
+    L.push(a.status === "unverified" ? `It was claimed to be enforced, but that couldn't be confirmed${a.why_unverified ? " (" + a.why_unverified + ")" : ""}.` : "Nothing in the code, schema or tests enforces it today.");
+    L.push("Add a database constraint, a guard or a test (or explain why it can't happen).");
+    if (av.note && av.note.trim()) L.push(`Reviewer: ${av.note.trim()}`);
+    if (where(a.hunks)) L.push(`Relied on at: ${where(a.hunks)}`);
+    items.push(L);
+  }
   for (const q of questionItems()) {
     if (!flags["q:" + q.id] || isChecked(q.rid)) continue;
     items.push([`EXPLAIN: ${q.q}`, ...(where(q.hunks) ? [`Where: ${where(q.hunks)}`] : [])]);
@@ -1472,6 +1510,86 @@ function renderBehavior() {
     items.forEach(sc => out.push(scenarioCard(sc)));
   }
   return secEl("behavior", "What behaves differently", ...out);
+}
+
+// ------------------------------------------------------------------ assumptions: what the change relies on
+// Each "it's enforced" claim was checked against the real file (llm.verify_assumptions); the proof is shown.
+// Anything unenforced needs a call: accept the risk, or ask the agent to enforce it.
+function assumptionItems() {
+  const llm = R.llm || {};
+  if (llm.status !== "ok") return [];
+  return (llm.assumptions || []).map(a => {
+    const first = HUNKS[(a.hunks || [])[0]];
+    return { ...a, file: first?.file, line: first?.hunk.new_start, topic: topicOf({ file: first?.file }) };
+  });
+}
+function needsCall(a) { return a.status !== "enforced"; }
+function assumptionSettled(a) { const v = averdicts[a.id] || {}; return v.v === "accept" || (v.v === "ask" && !!v.resolved); }
+const ENF_WORD = { db: "database constraint", code: "checked in code", type: "the type system", test: "a test" };
+function snippetEl(sn) {
+  return h("div", { class: "snip" }, sn.lines.map((l, i) => h("div", { class: sn.from + i === sn.at ? "hit" : "" }, h("span", {}, sn.from + i), h("span", {}, l))));
+}
+function assumptionRow(a) {
+  const av = averdicts[a.id] || {};
+  const row = h("div", { class: "arow" + (needsCall(a) && assumptionSettled(a) ? " settled" : ""), id: "as-" + a.id });
+  const body = h("div", {});
+  const ev = a.evidence || {};
+  const badge = a.status === "enforced" ? h("span", { class: "abadge enforced" }, "✓ " + (ENF_WORD[a.claimed] || "enforced"))
+    : a.status === "unverified" ? h("span", { class: "abadge unverified", title: a.why_unverified || "" }, "? couldn't verify")
+    : h("span", { class: "abadge none" }, "⚠ nothing enforces this");
+  body.append(h("div", { class: "at" }, a.text));
+  if (a.status === "enforced") { if (ev.note) body.append(h("div", { class: "ab" }, ev.note)); }
+  else {
+    if (a.breaks) body.append(h("div", { class: "ab" }, h("b", {}, "If it's false: "), a.breaks));
+    if (a.status === "unverified") body.append(h("div", { class: "ab" }, h("b", {}, "Claimed: "), `${ENF_WORD[a.claimed] || a.claimed}${ev.file ? ` at ${ev.file}${ev.line ? ":" + ev.line : ""}` : ""}, but ${a.why_unverified || "it couldn't be confirmed"}.`));
+  }
+  const meta = h("div", { class: "ameta" }, badge);
+  if (a.stale) meta.append(h("span", { class: "verdict stale", title: "The code that relies on this changed since" }, "code changed"));
+  if (a.status === "enforced" && a.snippet) {
+    let sn = null;
+    const b = h("button", { class: "toggle" }, "show proof");
+    b.addEventListener("click", () => { if (sn) { sn.remove(); sn = null; b.textContent = "show proof"; } else { sn = snippetEl(a.snippet); row.append(sn); b.textContent = "hide proof"; } });
+    meta.append(b, loc(ev.file, ev.line));
+  }
+  meta.append(codeToggle(body, a.hunks, "where it's relied on") || h("span"));
+  body.append(meta);
+  row.append(body);
+  if (needsCall(a)) {
+    const set = v => {
+      const cur = averdicts[a.id] || {};
+      if (cur.v === v) delete averdicts[a.id]; else averdicts[a.id] = { ...cur, v, resolved: false };
+      saveAverdicts(); row.replaceWith(assumptionRow(a)); renderRail();
+    };
+    row.append(h("div", { class: "dec" }, h("div", { class: "vbtns" },
+      h("button", { class: "agree" + (av.v === "accept" ? " on" : ""), title: "It's fine that nothing enforces this (click again to clear)", onclick: e => { e.stopPropagation(); set("accept"); } }, "Accept the risk"),
+      h("button", { class: "question" + (av.v === "ask" ? " on" : ""), title: "Ask the agent to add a constraint, guard or test (goes into Copy feedback)", onclick: e => { e.stopPropagation(); set("ask"); } }, "Ask to enforce"))));
+    if (av.v === "ask") {
+      const inp = h("input", { placeholder: "Optional: how you'd want it enforced (e.g. NOT NULL + backfill, or a test for the zero case)" });
+      inp.value = av.note || "";
+      inp.addEventListener("input", () => { averdicts[a.id].note = inp.value; saveAverdicts(); });
+      const c = h("input", { type: "checkbox", class: "chk" }); c.checked = !!av.resolved;
+      c.addEventListener("change", () => { averdicts[a.id].resolved = c.checked; saveAverdicts(); row.replaceWith(assumptionRow(a)); });
+      row.append(h("div", { class: "anote" }, inp, h("label", { class: "resolve" }, c, "Enforced now (or explained)")));
+    }
+    row.addEventListener("click", e => { if (row.classList.contains("settled") && !e.target.closest("button, input, a, .loc")) row.classList.toggle("peek"); });
+  }
+  return row;
+}
+function renderAssumptions() {
+  const llm = R.llm || {};
+  const items = assumptionItems().filter(inTopic);
+  const out = [];
+  if (llm.status === "running") out.push(h("div", { class: "card llm-state" }, h("span", { class: "spin" }), "Claude is checking what this change relies on, and what enforces it…"));
+  else if (llm.status !== "ok") out.push(h("div", { class: "empty" }, "With the model pass, the things this change relies on show up here, each checked for a constraint, guard or test that enforces it."));
+  else if (!("assumptions" in llm)) out.push(h("div", { class: "empty" }, "This AI pass predates assumption checks. Re-run it to see them."));
+  else if (!items.length) out.push(h("div", { class: "empty" }, (llm.assumptions || []).length ? "No assumptions in this topic." : "Nothing this change relies on beyond what the diff guarantees."));
+  else {
+    out.push(h("div", { class: "dec-intro" }, "What this change takes for granted. Enforced ones show the line that enforces them. For the rest, accept the risk or ask the agent to enforce it."));
+    const open = items.filter(needsCall), ok = items.filter(a => !needsCall(a));
+    if (open.length) out.push(h("div", { class: "agroup" }, `Not enforced · ${open.length}`), h("div", { class: "card" }, open.map(assumptionRow)));
+    if (ok.length) out.push(h("div", { class: "agroup" }, `Enforced · ${ok.length}`), h("div", { class: "card" }, ok.map(assumptionRow)));
+  }
+  return secEl("relies", "What this relies on", ...out);
 }
 
 // ------------------------------------------------------------------ comprehension
@@ -2116,7 +2234,7 @@ function render() {
   const y = window.scrollY;
   main.innerHTML = "";
   if (R.errors && R.errors.length) main.append(h("div", { class: "card", style: "padding:10px 16px;margin-bottom:16px;color:var(--high);font-size:13px" }, R.errors.join("\n")));
-  main.append(renderOverview(), renderDecisions(), renderMap(), renderBehavior(), renderUnderstand(), renderStory(), renderRisks(), renderLogic(), renderLayer("database"), renderLayer("schemas"), renderInterfaces(), renderFunctions(), renderFiles());
+  main.append(renderOverview(), renderDecisions(), renderMap(), renderBehavior(), renderAssumptions(), renderUnderstand(), renderStory(), renderRisks(), renderLogic(), renderLayer("database"), renderLayer("schemas"), renderInterfaces(), renderFunctions(), renderFiles());
   updateBack();
   syncGroups();
   window.scrollTo(0, y);
