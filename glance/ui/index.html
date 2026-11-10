@@ -172,6 +172,70 @@ section.sec > h2::after { order: 2; }
 .dec.agreed:not(.peek) .dhd { cursor: pointer; padding-top: 9px; padding-bottom: 9px; }
 .dec-intro { color: var(--muted); font-size: 13px; margin: -4px 2px 12px; max-width: 80ch; }
 
+/* ---------- map ---------- */
+.mapbar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 0 0 10px; }
+.mapbar .lbl { font-size: 12px; color: var(--muted); margin-right: 4px; }
+.mapbar .btn.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.map { position: relative; display: grid; gap: 34px; padding: 14px 16px 18px; overflow: hidden; }
+.map svg.edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: visible; }
+.mcol { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.mcol .mch { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); font-weight: 650; }
+.mcol .mcb { font-size: 11.5px; color: var(--faint); margin-top: -8px; }
+.mnode { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 8px; padding: 7px 10px 8px; cursor: pointer;
+  box-shadow: var(--shadow); transition: opacity .15s, border-color .15s, box-shadow .15s; position: relative; }
+.mnode.added { border-left-color: var(--add-ink); } .mnode.modified { border-left-color: var(--med); } .mnode.removed { border-left-color: var(--del-ink); }
+.mnode:hover { border-color: var(--faint); }
+.mnode.sel { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.map.focus .mnode:not(.on) { opacity: .28; }
+.mnode .mk { font-size: 10px; color: var(--faint); text-transform: uppercase; letter-spacing: .06em; display: flex; gap: 6px; align-items: center; }
+.mnode .mk .stx { font-weight: 700; }
+.mnode.added .mk .stx { color: var(--add-ink); } .mnode.modified .mk .stx { color: var(--med); } .mnode.removed .mk .stx { color: var(--del-ink); }
+.mnode .mn { font-family: var(--mono); font-size: 12.5px; color: var(--ink); font-weight: 600; word-break: break-word; }
+.mnode.removed .mn { text-decoration: line-through; color: var(--muted); }
+.mnode .mf { margin: 5px 0 0; padding: 0; list-style: none; font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+.mnode .mf li { display: flex; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mnode .mf li .s { width: 9px; flex: none; font-weight: 700; }
+.mnode .mf li.added { color: var(--add-ink); } .mnode .mf li.removed { color: var(--del-ink); text-decoration: line-through; } .mnode .mf li.changed, .mnode .mf li.renamed { color: var(--med); }
+.mnode .mf li .ty { color: var(--faint); overflow: hidden; text-overflow: ellipsis; }
+.mnode .md { font-size: 11.5px; color: var(--faint); margin-top: 3px; font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mnode .fb { position: absolute; top: -8px; right: -8px; display: flex; gap: 3px; }
+.mnode .fb span { background: var(--accent); color: #fff; font-size: 10.5px; font-weight: 700; border-radius: 999px; min-width: 18px; height: 18px; display: grid; place-content: center; padding: 0 5px; }
+.edges path { fill: none; stroke: var(--line); stroke-width: 1.4; transition: opacity .15s; }
+.edges path.writes { stroke: color-mix(in srgb, var(--med) 55%, transparent); }
+.edges path.reads { stroke: color-mix(in srgb, var(--get) 45%, transparent); }
+.edges path.alters { stroke: color-mix(in srgb, var(--other) 55%, transparent); }
+.edges path.calls, .edges path.enqueues { stroke: color-mix(in srgb, var(--muted) 45%, transparent); }
+.edges path.uses, .edges path.contains, .edges path.references { stroke: color-mix(in srgb, var(--faint) 55%, transparent); stroke-dasharray: 4 3; }
+.edges path.weak:not(.on) { display: none; }      /* "uses a shape" lines only when you're looking at them */
+.edges path.flow { stroke: var(--accent); stroke-width: 2.4; stroke-dasharray: none; }
+.map.focus .edges path:not(.on) { opacity: .12; }
+.map.focus .edges path.on { stroke-width: 2.2; }
+.edges text { font: 600 10.5px var(--sans); fill: var(--ink-2); paint-order: stroke; stroke: var(--panel); stroke-width: 4px; }
+.mlegend { display: flex; gap: 14px; flex-wrap: wrap; padding: 8px 16px; border-top: 1px solid var(--line-2); font-size: 11.5px; color: var(--muted); }
+.mlegend i { display: inline-block; width: 18px; height: 0; border-top: 2px solid; vertical-align: middle; margin-right: 5px; }
+.mdetail { position: fixed; top: 64px; right: 16px; bottom: 16px; width: min(440px, calc(100vw - 32px)); z-index: 30; overflow: auto;
+  transform: translateX(calc(100% + 24px)); transition: transform .2s ease; }
+.mdetail.open { transform: none; }
+.mdetail > .card { box-shadow: 0 8px 30px rgba(0,0,0,.14); min-height: 100%; }
+.mdetail .x { margin-left: auto; border: 0; background: none; cursor: pointer; color: var(--muted); font-size: 16px; padding: 0 2px; }
+.mdetail .x:hover { color: var(--ink); }
+.mdetail .mdh { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 12px 16px 6px; }
+.mdetail .mdh .mn { font-family: var(--mono); font-size: 14px; font-weight: 650; }
+.mdetail .what { padding: 0 16px 8px; font-size: 13.5px; color: var(--ink-2); }
+.mdetail .conn { display: grid; grid-template-columns: 1fr; border-top: 1px solid var(--line-2); }
+.mdetail .conn > div { padding: 10px 16px; font-size: 13px; }
+.mdetail .conn > div + div { border-top: 1px solid var(--line-2); }
+.mdetail .conn h5 { margin: 0 0 5px; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); font-weight: 650; }
+.mdetail .conn .ek { color: var(--muted); font-size: 12px; margin-right: 4px; }
+.mdetail .ftable { border-top: 1px solid var(--line-2); }
+.flowsteps { margin: 0; padding: 4px 0; list-style: none; }
+.flowsteps li { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 6px; padding: 8px 16px 8px 8px; border-top: 1px solid var(--line-2); cursor: pointer; }
+.flowsteps li:first-child { border-top: 0; }
+.flowsteps li:hover { background: var(--panel-2); }
+.flowsteps li .n { color: var(--accent); font-weight: 700; text-align: center; }
+.flowsteps li .dt { font-family: var(--mono); font-size: 12px; color: var(--accent); margin-top: 2px; }
+@media (max-width: 900px) { .map { grid-template-columns: 1fr !important; } .map svg.edges { display: none; } }
+
 /* ---------- behavior (scenario tables) ---------- */
 .scard { padding: 0; }
 .scard .shd { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; padding: 12px 16px 10px; align-items: start; }
@@ -747,7 +811,7 @@ function renderTop() {
 }
 
 const SECTIONS = [
-  ["overview", "Overview"], ["decisions", "Decisions"], ["behavior", "Behavior"], ["understand", "Comprehension"], ["story", "Step by step"], ["risks", "Risks"], ["logic", "Business logic"], ["database", "Database"], ["schemas", "Schemas & types"],
+  ["overview", "Overview"], ["decisions", "Decisions"], ["map", "Map"], ["behavior", "Behavior"], ["understand", "Comprehension"], ["story", "Step by step"], ["risks", "Risks"], ["logic", "Business logic"], ["database", "Database"], ["schemas", "Schemas & types"],
   ["interfaces", "Endpoints & tasks"], ["functions", "Functions"], ["files", "Files"],
 ];
 function sectionCounts() {
@@ -758,6 +822,7 @@ function sectionCounts() {
   return {
     overview: "",
     decisions: decisionItems().filter(inTopic).length,
+    map: mapNodes().length,
     behavior: scenarioItems().filter(inTopic).length,
     understand: questionItems().filter(inTopic).length + decisionItems().filter(d => ["question", "disagree"].includes((dverdicts[d.id] || {}).v)).length,
     story: ((R.story || {}).units || []).filter(inTopic).length,
@@ -973,6 +1038,203 @@ function renderDecisions() {
     items.sort((a, b) => order[a.weight] - order[b.weight]).forEach(d => out.push(decisionCard(d)));
   }
   return secEl("decisions", "Decisions", ...out);
+}
+
+// ------------------------------------------------------------------ map: data models and how data moves
+// Columns run the way data usually moves: entry points → logic → data shapes → storage. Every edge is a real
+// reference found in the code (graph.py). Hover a node for its neighbours; click to trace everything it reaches
+// and everything that reaches it; pick a flow to walk it step by step.
+let mapSel = null, mapFlow = null, mapClose = null;
+const EDGE_WORD = { writes: "writes", reads: "reads", alters: "alters", calls: "calls", enqueues: "enqueues", uses: "uses", contains: "contains", references: "references" };
+function mapNodes() { return ((R.graph || {}).nodes || []).filter(inTopic); }
+function mapFlows() { const l = R.llm || {}; return l.status === "ok" ? (l.flows || []) : []; }
+function reach(start, edges, dir) {
+  const seen = new Set([start]), q = [start];
+  while (q.length) { const x = q.shift(); for (const e of edges) { const [a, b] = dir === "down" ? [e.from, e.to] : [e.to, e.from]; if (a === x && !seen.has(b)) { seen.add(b); q.push(b); } } }
+  return seen;
+}
+function orderColumns(cols, nodes, edges) {
+  // two barycentre passes so connected nodes sit near each other and edges cross less
+  const pos = {};
+  const set = () => cols.forEach(c => c.items.forEach((n, i) => pos[n.id] = i / Math.max(1, c.items.length - 1)));
+  set();
+  for (let pass = 0; pass < 2; pass++) {
+    for (const c of cols) {
+      const score = n => { const nb = edges.filter(e => e.from === n.id || e.to === n.id).map(e => pos[e.from === n.id ? e.to : e.from]).filter(v => v != null); return nb.length ? nb.reduce((a, b) => a + b) / nb.length : pos[n.id]; };
+      c.items.sort((a, b) => score(a) - score(b));
+    }
+    set();
+  }
+}
+function nodeEl(n, flowIdx) {
+  const el = h("div", { class: "mnode " + n.status, "data-id": n.id, title: `${n.file}:${n.line}` });
+  el.append(h("div", { class: "mk" }, h("span", {}, n.kind), h("span", { class: "stx" }, STATUS_WORD[n.status] || "")), h("div", { class: "mn" }, n.name));
+  if (n.fields && n.fields.length) {
+    const rank = { added: 0, removed: 1, changed: 2, renamed: 2 };
+    const fs = [...n.fields].sort((a, b) => (rank[a.change] ?? 3) - (rank[b.change] ?? 3));
+    const changedN = fs.filter(f => f.change).length;
+    const show = fs.slice(0, Math.max(5, Math.min(changedN, 8)));
+    const sym = { added: "+", removed: "−", changed: "~", renamed: "↷" };
+    el.append(h("ul", { class: "mf" }, show.map(f => h("li", { class: f.change || "" }, h("span", { class: "s" }, sym[f.change] || ""), f.name, h("span", { class: "ty" }, f.type)))));
+    if (fs.length > show.length) el.append(h("div", { class: "md" }, `+${fs.length - show.length} more`));
+  } else if (n.ops && n.ops.length) {
+    el.append(h("ul", { class: "mf" }, n.ops.slice(0, 5).map(o => h("li", { class: /^(drop|remove|delete)/i.test(o) ? "removed" : /^(add|create)/i.test(o) ? "added" : "changed" }, h("span", { class: "s" }, ""), o))));
+    if (n.ops.length > 5) el.append(h("div", { class: "md" }, `+${n.ops.length - 5} more`));
+  } else if (n.kind !== "route" && n.detail) el.append(h("div", { class: "md", title: n.detail }, n.detail));
+  if (flowIdx && flowIdx.length) el.append(h("div", { class: "fb" }, flowIdx.map(i => h("span", {}, i))));
+  return el;
+}
+function renderMap() {
+  const g = R.graph || {};
+  const nodes = mapNodes();
+  if (!nodes.length) return secEl("map", "Map", h("div", { class: "empty" }, "No data models, routes or jobs on the map for this change."));
+  const ids = new Set(nodes.map(n => n.id));
+  const edges = (g.edges || []).filter(e => ids.has(e.from) && ids.has(e.to));
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+  const flows = mapFlows();
+  if (mapFlow && !flows.find(f => f.id === mapFlow)) mapFlow = null;
+  if (mapSel && !byId[mapSel]) mapSel = null;
+  const flow = flows.find(f => f.id === mapFlow);
+
+  const out = [h("div", { class: "dec-intro" }, "The new and changed data models, and what reads and writes them. Every line is a real reference in the code. Hover to see neighbours, click a box to trace everything it touches.")];
+  if (flows.length) {
+    const bar = h("div", { class: "mapbar" }, h("span", { class: "lbl" }, "Follow a flow:"));
+    bar.append(h("button", { class: "btn" + (!mapFlow ? " on" : ""), onclick: () => { mapFlow = null; mapSel = null; rerenderMap(); } }, "Everything"));
+    for (const f of flows) bar.append(h("button", { class: "btn" + (mapFlow === f.id ? " on" : ""), title: f.trigger || "", onclick: () => { mapFlow = mapFlow === f.id ? null : f.id; mapSel = null; rerenderMap(); } }, f.title));
+    out.push(bar);
+  }
+
+  const cols = (g.columns || []).map(c => ({ ...c, items: nodes.filter(n => n.col === c.id) })).filter(c => c.items.length);
+  orderColumns(cols, nodes, edges);
+  const colIndex = Object.fromEntries(cols.map((c, i) => [c.id, i]));
+  const flowIdx = {};
+  (flow ? flow.steps : []).forEach((st, i) => (flowIdx[st.unit] = flowIdx[st.unit] || []).push(i + 1));
+
+  const card = h("div", { class: "card" });
+  const map = h("div", { class: "map", style: `grid-template-columns: repeat(${cols.length}, minmax(0, 1fr))` });
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "edges");
+  map.append(svg);
+  for (const c of cols) map.append(h("div", { class: "mcol" }, h("div", { class: "mch" }, c.title), h("div", { class: "mcb" }, c.blurb), c.items.map(n => nodeEl(n, flowIdx[n.id]))));
+  card.append(map);
+  const legend = h("div", { class: "mlegend" },
+    [["writes", "var(--med)"], ["reads", "var(--get)"], ["alters", "var(--other)"], ["calls", "var(--muted)"]].map(([k, col]) => h("span", {}, h("i", { style: `border-color:${col}` }), k)),
+    h("span", {}, h("i", { style: "border-color:var(--faint);border-top-style:dashed" }), "uses a shape"),
+    h("span", {}, h("i", { style: "border-color:var(--add-ink);width:4px;border-top-width:8px" }), "new"), h("span", {}, h("i", { style: "border-color:var(--med);width:4px;border-top-width:8px" }), "changed"));
+  card.append(legend);
+  const detail = h("div", { class: "mdetail" });
+
+  // which nodes/edges are lit: a selection traces up- and downstream; a flow lights its steps
+  const litFor = sel => {
+    if (sel) {
+      const down = reach(sel, edges, "down"), up = reach(sel, edges, "up");
+      const nodesOn = new Set([...down, ...up]);
+      return { nodes: nodesOn, edge: e => (down.has(e.from) && down.has(e.to)) || (up.has(e.from) && up.has(e.to)) };
+    }
+    if (flow) {
+      const on = new Set(flow.steps.map(s => s.unit));
+      return { nodes: on, edge: e => on.has(e.from) && on.has(e.to) };
+    }
+    return null;
+  };
+  const flowPairs = flow ? flow.steps.slice(1).map((st, i) => [flow.steps[i].unit, st.unit]).filter(([a, b]) => a !== b && byId[a] && byId[b]) : [];
+
+  const draw = (hover) => {
+    while (svg.firstChild) svg.firstChild.remove();
+    const box = map.getBoundingClientRect();
+    if (!box.width || getComputedStyle(svg).display === "none") return;
+    const ns = "http://www.w3.org/2000/svg";
+    const defs = document.createElementNS(ns, "defs");
+    defs.innerHTML = `<marker id="arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" style="fill:var(--faint);stroke:none"/></marker>`;
+    svg.append(defs);
+    const rect = id => { const el = map.querySelector(`.mnode[data-id="${id}"]`); if (!el) return null; const r = el.getBoundingClientRect(); return { l: r.left - box.left, r: r.right - box.left, y: r.top - box.top + Math.min(r.height / 2, 18) }; };
+    const lit = hover ? (() => { const on = new Set([hover]); edges.forEach(e => { if (e.from === hover) on.add(e.to); if (e.to === hover) on.add(e.from); }); return { nodes: on, edge: e => e.from === hover || e.to === hover }; })() : litFor(mapSel);
+    map.classList.toggle("focus", !!lit);
+    map.querySelectorAll(".mnode").forEach(el => { el.classList.toggle("on", !!lit && lit.nodes.has(el.dataset.id)); el.classList.toggle("sel", el.dataset.id === mapSel); });
+    const pathFor = (a, b) => {
+      const A = rect(a), B = rect(b);
+      if (!A || !B) return null;
+      const ca = colIndex[byId[a].col], cb = colIndex[byId[b].col];
+      let x1, x2, d;
+      if (ca === cb) { x1 = A.r; x2 = B.r; const bulge = 28 + Math.min(40, Math.abs(B.y - A.y) / 6); d = `M${x1},${A.y} C${x1 + bulge},${A.y} ${x2 + bulge},${B.y} ${x2 + 2},${B.y}`; return { d, mx: x1 + bulge * .75, my: (A.y + B.y) / 2 }; }
+      if (ca < cb) { x1 = A.r; x2 = B.l - 2; } else { x1 = A.l; x2 = B.r + 2; }
+      const dx = (x2 - x1) * .45;
+      d = `M${x1},${A.y} C${x1 + dx},${A.y} ${x2 - dx},${B.y} ${x2},${B.y}`;
+      return { d, mx: (x1 + x2) / 2, my: (A.y + B.y) / 2 };
+    };
+    const labels = [];
+    for (const e of edges) {
+      const p = pathFor(e.from, e.to);
+      if (!p) continue;
+      const on = !!lit && lit.edge(e);
+      const el = document.createElementNS(ns, "path");
+      const weak = ["uses", "contains", "references"].includes(e.kind);
+      el.setAttribute("d", p.d); el.setAttribute("class", e.kind + (weak ? " weak" : "") + (on ? " on" : "")); el.setAttribute("marker-end", "url(#arr)");
+      svg.append(el);
+      if (on && (hover || mapSel)) labels.push([p, EDGE_WORD[e.kind] || e.kind]);
+    }
+    for (const [a, b] of flowPairs) {
+      const p = pathFor(a, b);
+      if (!p) continue;
+      const el = document.createElementNS(ns, "path");
+      el.setAttribute("d", p.d); el.setAttribute("class", "flow on"); el.setAttribute("marker-end", "url(#arr)");
+      svg.append(el);
+    }
+    for (const [p, word] of labels) { const t = document.createElementNS(ns, "text"); t.setAttribute("x", p.mx); t.setAttribute("y", p.my - 3); t.setAttribute("text-anchor", "middle"); t.textContent = word; svg.append(t); }
+  };
+
+  const pick = id => { mapSel = id; showDetail(); draw(); };
+  const close = () => { if (mapSel) pick(null); else if (mapFlow) { mapFlow = null; rerenderMap(); } };
+  const showDetail = () => {
+    detail.innerHTML = "";
+    if (mapSel) detail.append(mapDetail(byId[mapSel], edges, byId, pick, close));
+    else if (flow) detail.append(flowCard(flow, byId, pick, close));
+    detail.classList.toggle("open", !!(mapSel || flow));
+  };
+  mapClose = close;
+  map.addEventListener("mouseover", e => { const n = e.target.closest(".mnode"); if (n) draw(n.dataset.id); });
+  map.addEventListener("mouseleave", () => draw());
+  map.addEventListener("mouseout", e => { if (e.target.closest(".mnode") && !e.relatedTarget?.closest?.(".mnode")) draw(); });
+  map.addEventListener("click", e => {
+    const n = e.target.closest(".mnode");
+    mapSel = n && n.dataset.id !== mapSel ? n.dataset.id : null;
+    showDetail(); draw();
+  });
+  showDetail();
+  new ResizeObserver(() => draw()).observe(map);
+  requestAnimationFrame(() => draw());
+  out.push(card, detail);
+  return secEl("map", "Map", ...out);
+}
+function rerenderMap() { const old = document.getElementById("map"); if (old) old.replaceWith(renderMap()); }
+function mapDetail(n, edges, byId, select, close) {
+  const u = ((R.story || {}).units || []).find(x => x.id === n.id) || {};
+  const ai = (storyAI().units || {})[n.id] || {};
+  const card = h("div", { class: "card" });
+  card.append(h("div", { class: "mdh" }, h("span", { class: "mn" }, n.name), h("span", { class: "st " + n.status }, STATUS_WORD[n.status] || n.status), h("span", { class: "fw" }, n.kind),
+    h("button", { class: "x", title: "Close (Esc)", onclick: close }, "✕")));
+  card.append(h("div", { style: "padding:0 16px 8px" }, loc(n.file, n.line)));
+  if (ai.what || ai.why) card.append(h("div", { class: "what" }, ai.what || "", ai.why ? h("div", { style: "color:var(--muted);margin-top:2px" }, ai.why) : null));
+  const conn = (list, dir) => list.length ? list.map(e => { const other = byId[dir === "out" ? e.to : e.from]; return h("div", {}, h("span", { class: "ek" }, EDGE_WORD[e.kind] || e.kind), h("span", { class: "chip", title: "Select on the map", onclick: () => select(other.id) }, other.name)); }) : [h("div", { class: "empty" }, "nothing changed")];
+  const outE = edges.filter(e => e.from === n.id), inE = edges.filter(e => e.to === n.id);
+  card.append(h("div", { class: "conn" }, h("div", {}, h("h5", {}, "Uses / reads / writes"), ...conn(outE, "out")), h("div", {}, h("h5", {}, "Used by"), ...conn(inE, "in"))));
+  const c0 = R.changes.find(c => c.id === (u.change_ids || [])[0]);
+  if (c0 && ["table", "model", "type"].includes(c0.kind)) { const ft = fieldTable(c0, 40); if (ft) card.append(ft); }
+  const foot = h("div", { class: "dfoot", style: "display:flex;gap:12px;padding:8px 16px;border-top:1px solid var(--line-2)" });
+  foot.append(codeToggle(foot, u.hunk_ids, "show code") || h("span"), h("button", { class: "toggle", onclick: () => jumpUnit(n.id) }, "open in Step by step"));
+  card.append(foot);
+  return card;
+}
+function flowCard(flow, byId, select, close) {
+  const card = h("div", { class: "card" });
+  card.append(h("div", { class: "mdh" }, h("span", { class: "mn", style: "font-family:var(--sans)" }, flow.title), h("button", { class: "x", title: "Close (Esc)", onclick: close }, "✕")));
+  if (flow.trigger) card.append(h("div", { class: "what" }, h("span", { class: "src" }, "Starts with  "), flow.trigger));
+  card.append(h("ol", { class: "flowsteps" }, flow.steps.map((st, i) => {
+    const n = byId[st.unit];
+    return h("li", { onclick: () => n && select(n.id) }, h("span", { class: "n" }, i + 1),
+      h("div", {}, n ? h("span", { class: "chip" }, n.name) : null, " ", st.text, st.data ? h("div", { class: "dt" }, st.data) : null));
+  })));
+  return card;
 }
 
 // ------------------------------------------------------------------ behavior: before/after scenario tables
@@ -1686,7 +1948,7 @@ function render() {
   const y = window.scrollY;
   main.innerHTML = "";
   if (R.errors && R.errors.length) main.append(h("div", { class: "card", style: "padding:10px 16px;margin-bottom:16px;color:var(--high);font-size:13px" }, R.errors.join("\n")));
-  main.append(renderOverview(), renderDecisions(), renderBehavior(), renderUnderstand(), renderStory(), renderRisks(), renderLogic(), renderLayer("database"), renderLayer("schemas"), renderInterfaces(), renderFunctions(), renderFiles());
+  main.append(renderOverview(), renderDecisions(), renderMap(), renderBehavior(), renderUnderstand(), renderStory(), renderRisks(), renderLogic(), renderLayer("database"), renderLayer("schemas"), renderInterfaces(), renderFunctions(), renderFiles());
   updateBack();
   syncGroups();
   window.scrollTo(0, y);
@@ -1777,6 +2039,7 @@ document.addEventListener("keydown", e => {
   if (["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName) || e.target.isContentEditable || e.metaKey || e.ctrlKey) return;
   if (e.key === "r" && !STATIC) refresh();
   if (e.key === "Backspace" && backStack.length) { e.preventDefault(); goBack(); }
+  if (e.key === "Escape" && mapClose && (mapSel || mapFlow)) mapClose();
 });
 document.getElementById("backbtn").addEventListener("click", goBack);
 boot();

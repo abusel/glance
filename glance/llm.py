@@ -72,6 +72,14 @@ and what happens before and after this change:
 - hunks: where the new behavior lives. units: story unit ids involved (may be empty).
 Skip scenarios for pure refactors, plumbing and CRUD with no rules.
 
+Flows trace data through the change end to end, so a reviewer sees how the pieces connect. Write 1-4 flows,
+one per distinct path (e.g. "Create a loan", "Nightly margin sweep"). Use the "Data map edges" below: they are
+the real references between units. Each flow is {"title": "...", "trigger": "what starts it (a request, a
+schedule, an event)", "steps": [{"unit": "u..", "text": "what happens at this step, one sentence", "data": "the
+shape of the data at this point, concretely: LoanCreate{principal, term_months} or 'Loan row with
+interest_rate set' or '202 + MarginCallOut'"}]}. 2-8 steps, in the order they happen, only listed unit ids. If
+a step happens in code that didn't change, fold it into the neighbouring step's text.
+
 Questions check that the reviewer actually understands the change. Write 3-8 questions someone must be able
 to answer before merging this safely: about behavior, failure modes, data and the decisions above, not trivia
 or names ("What happens to an account that drops below 25% between nightly runs?", "If the Stripe call fails
@@ -113,6 +121,7 @@ Return ONLY a JSON object, no prose, matching:
   "scenarios": [{"title": "...", "subject": "...", "rule": "...", "hunks": ["h_..."], "units": ["u.."],
                  "rows": [{"case": "...", "input": {} | null, "before": "...", "after": "..."}]}],
   "questions": [{"q": "...", "answer": "...", "hunks": ["h_..."]}],
+  "flows": [{"title": "...", "trigger": "...", "steps": [{"unit": "u..", "text": "...", "data": "..."}]}],
   "story": {"goal": "...", "how_it_works": [{"text": "...", "units": ["u1", "u4"]}],
             "chapters": {"database": "...", "routes": "...", "schemas": "...", "background": "...", "supporting": "..."},
             "units": {"u1": {"what": "...", "why": "...", "attention": "read|routine", "read_reason": "..."}},
@@ -181,6 +190,12 @@ def build_prompt(report: dict) -> str:
                 parts.append(f"{uid} [{u['status']} {u['kind']}] {u['name']} — {u['detail'][:160]}{extra} ({u['file']}:{u['line']}, {u.get('churn', 0)} changed lines) default: {u.get('attention', 'read')} ({u.get('attention_why', '')}) hunks: {','.join(u['hunk_ids'][:6])}")
         if story.get("test_files"):
             parts.append(f"(plus {len(story['test_files'])} test files, not listed)")
+        parts.append("")
+    graph = report.get("graph") or {}
+    if graph.get("edges"):
+        names = {n["id"]: n["name"] for n in graph.get("nodes", [])}
+        parts.append("## Data map edges (unit → unit it references)")
+        parts += [f"{e['from']} {names.get(e['from'], '')} --{e['kind']}--> {e['to']} {names.get(e['to'], '')}" for e in graph["edges"][:200]]
         parts.append("")
     if report["risks"]:
         parts += ["## Static risk flags", *(f"- [{r['severity']}] {r['title']} ({r['file']}:{r['line']})" for r in report["risks"][:60]), ""]
@@ -268,6 +283,7 @@ def ground(result: dict, valid: set[str], units: set[str] | None = None, hunk_in
     result["decisions"] = ground_decisions(keep(raw_decisions), units or set())
     result["scenarios"] = ground_scenarios(keep(result.get("scenarios")), units or set())
     result["questions"] = ground_questions(keep(result.get("questions")))
+    result["flows"] = ground_flows(result.get("flows"), units or set())
     intent = result.get("intent")
     if isinstance(intent, dict):
         extra = []
@@ -345,6 +361,21 @@ def ground_questions(items: list) -> list[dict]:
     return out[:8]
 
 
+def ground_flows(items: Any, units: set[str]) -> list[dict]:
+    """Flows cite story units, not hunks: keep steps on real units, keep flows with at least two of them."""
+    out = []
+    for f in items if isinstance(items, list) else []:
+        if not isinstance(f, dict) or not str(f.get("title") or "").strip():
+            continue
+        steps = [{"unit": st["unit"], "text": str(st.get("text") or "").strip()[:300], "data": str(st.get("data") or "").strip()[:200]}
+                 for st in f.get("steps") or [] if isinstance(st, dict) and st.get("unit") in units]
+        if len(steps) < 2:
+            continue
+        out.append({"id": "f_" + hashlib.sha1(str(f["title"]).encode()).hexdigest()[:10], "title": str(f["title"]).strip()[:160],
+                    "trigger": str(f.get("trigger") or "").strip()[:200], "steps": steps[:8]})
+    return out[:4]
+
+
 def attach_evidence(result: dict, report: dict) -> dict:
     """Give each concern a stable id, its files, and the cited code, so it can be re-checked after edits.
     Decisions get a stable id and a fingerprint too, so a reviewer's verdict can be flagged when the code moves."""
@@ -415,6 +446,13 @@ def carry_over(old: dict, new: dict) -> dict:
         st["how_it_works"] = [s2 for s2 in st["how_it_works"] if s2["units"]]
         st["read_first"] = [dict(sp, unit=remap[sp["unit"]]) for sp in st.get("read_first") or []
                             if sp.get("unit") in remap and sp.get("hunk") in valid]
+    if "flows" in out:
+        flows = []
+        for f in out["flows"]:
+            steps = [dict(st, unit=remap[st["unit"]]) for st in f.get("steps") or [] if st.get("unit") in remap]
+            if len(steps) >= 2:
+                flows.append(dict(f, steps=steps))
+        out["flows"] = flows
     if old.get("intent") != new.get("intent"):
         out["intent"] = None
     out["carried"] = True

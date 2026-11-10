@@ -534,3 +534,34 @@ def test_scenarios_and_questions(py_report):
 
     md = render({**py_report, "llm": old["llm"]})
     assert "| $5k | $50 | **$25** |" in md and "What if it fails?" in md
+
+
+def test_data_map(py_report, ts_report):
+    def edges(rep):
+        n = {x["id"]: x for x in rep["graph"]["nodes"]}
+        return {(n[e["from"]]["name"], e["kind"], n[e["to"]]["name"]) for e in rep["graph"]["edges"]}
+
+    py = edges(py_report)
+    assert ("0002", "alters", "Loan") in py
+    assert ("POST /loans", "uses", "LoanCreate") in py
+    assert not any(t == "Loan" and s.startswith(("POST", "GET")) for s, _, t in py)   # "/loans" in a URL isn't the table
+    ts = edges(ts_report)
+    assert ("POST /orders/:id/refunds", "writes", "Order") in ts                     # prisma.order.update(...)
+    loan = next(x for x in py_report["graph"]["nodes"] if x["name"] == "Loan")
+    assert loan["col"] == "store" and {f["change"] for f in loan["fields"]} >= {"added", "removed"}
+    assert "Data map edges" in llm.build_prompt(py_report)
+
+
+def test_flows_grounded_and_carried(py_report):
+    import copy
+
+    from glance.llm import carry_over, ground_flows
+
+    u = [x["id"] for x in py_report["story"]["units"]]
+    flows = ground_flows([
+        {"title": "Create", "trigger": "POST", "steps": [{"unit": u[0], "text": "a", "data": "X"}, {"unit": "u999"}, {"unit": u[1], "text": "b"}]},
+        {"title": "Too short", "steps": [{"unit": u[0]}]}, {"title": "", "steps": []}, "junk"], set(u))
+    assert [f["title"] for f in flows] == ["Create"] and [s["unit"] for s in flows[0]["steps"]] == [u[0], u[1]]
+    old = copy.deepcopy(py_report)
+    old["llm"] = {"status": "ok", "flows": flows, "story": {"units": {}}}
+    assert carry_over(old, copy.deepcopy(py_report))["flows"][0]["steps"][0]["unit"] == u[0]

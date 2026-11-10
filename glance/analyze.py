@@ -7,6 +7,7 @@ import time
 from collections import Counter, defaultdict
 from typing import Any
 
+from .graph import build_graph
 from .story import build_story
 from .topics import assign_topics
 from . import risk
@@ -395,4 +396,5 @@ def analyze(cs: ChangeSet, with_callers: bool = True, intent: str | None = None)
     for c in report["changes"]:
         c["layer"] = data_layer(c)
     report["story"] = build_story(report)
+    report["graph"] = build_graph(report, {f.path: f.new_text for f in cs.files}, {f.path: f.old_text for f in cs.files})
     return report

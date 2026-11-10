@@ -59,6 +59,16 @@ def render(report: dict[str, Any], max_items: int = 40) -> str:
                 L.append(f"  - tradeoff: {d['tradeoff']}")
         L.append("")
 
+    flows = llm.get("flows") or [] if llm.get("status") == "ok" else []
+    if flows:
+        names = {u["id"]: u["name"] for u in (r.get("story") or {}).get("units", [])}
+        L.append("## How data flows")
+        for f in flows:
+            L.append(f"**{f['title']}**" + (f" · _{f['trigger']}_" if f.get("trigger") else ""))
+            for i, st in enumerate(f["steps"], 1):
+                L.append(f"{i}. `{names.get(st['unit'], st['unit'])}` {st.get('text', '')}" + (f" → {st['data']}" if st.get("data") else ""))
+            L.append("")
+
     scenarios = llm.get("scenarios") or [] if llm.get("status") == "ok" else []
     if scenarios:
         L.append("## What behaves differently")
