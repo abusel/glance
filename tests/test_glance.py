@@ -565,3 +565,53 @@ def test_flows_grounded_and_carried(py_report):
     old = copy.deepcopy(py_report)
     old["llm"] = {"status": "ok", "flows": flows, "story": {"units": {}}}
     assert carry_over(old, copy.deepcopy(py_report))["flows"][0]["steps"][0]["unit"] == u[0]
+
+
+def test_probe_runs_before_and_after(tmp_path, monkeypatch):
+    import sys
+
+    from glance import probe
+
+    monkeypatch.setattr(probe, "CACHE", tmp_path / "cache" / "snapshots")
+    monkeypatch.setenv("GLANCE_PYTHON", sys.executable)
+    rep = analyze(collect(make_python_repo(tmp_path / "py")))
+    t = probe.resolve_target({"subject": "current_rate(principal, term_months)"}, rep)
+    assert t == {"file": "app/services/rates.py", "function": "current_rate", "params": ["principal", "term_months"],
+                 "pure": False, "existed_before": True}
+    out = probe.run(rep, t, [{"input": {"principal": 10000, "term_months": 36}}, {"input": {"principal": 60000}}])
+    before, after = out["before"]["results"], out["after"]["results"]
+    assert before[0]["raised"] == "TypeError"                  # the old function had no term_months
+    assert after[0] == {"ok": True, "value": "0.070", "repr": "Decimal('0.070')", "ms": after[0]["ms"]}
+    assert before[1]["value"] == after[1]["value"] == "0.055"
+    new_fn = probe.resolve_target({"subject": "equity_ratio(equity, loan_amount)"}, rep)
+    res = probe.run(rep, new_fn, [{"input": {"equity": 1, "loan_amount": 3}}])
+    assert res["before"]["missing"] and "httpx" in res["after"]["error"]     # new function; its module needs httpx
+    assert probe.resolve_target({"subject": "no_such_fn(x)"}, rep) is None
+    assert probe.run(rep, {"file": "README.md", "function": "x"}, [])["error"]
+
+
+def test_probe_endpoint(tmp_path, monkeypatch):
+    import http.client
+    import sys
+    import threading
+    from http.server import ThreadingHTTPServer
+
+    from glance import probe
+    from glance.server import State, make_handler
+
+    monkeypatch.setattr(probe, "CACHE", tmp_path / "cache" / "snapshots")
+    monkeypatch.setenv("GLANCE_PYTHON", sys.executable)
+    rep = analyze(collect(make_python_repo(tmp_path / "py")))
+    rep["llm"] = {"status": "ok", "scenarios": [{"id": "s_1", "target": probe.resolve_target({"subject": "current_rate(p)"}, rep)}]}
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(State(rep)))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        c = http.client.HTTPConnection("127.0.0.1", srv.server_port)
+        c.request("POST", "/api/probe", json.dumps({"id": "s_1", "cases": [{"input": {"principal": 60000}}], "sides": ["after"]}), {"Content-Type": "application/json"})
+        r = c.getresponse()
+        body = json.loads(r.read())
+        assert r.status == 200 and body["after"]["results"][0]["value"] == "0.055" and "before" not in body
+        c.request("POST", "/api/probe", json.dumps({"id": "nope", "cases": []}))
+        assert c.getresponse().status == 404
+    finally:
+        srv.shutdown()

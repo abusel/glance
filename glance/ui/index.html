@@ -250,7 +250,7 @@ table.sc td:first-child { padding-left: 16px; color: var(--ink); }
 table.sc th:first-child { padding-left: 16px; }
 table.sc .inp { display: block; font-family: var(--mono); font-size: 11px; color: var(--faint); margin-top: 1px; word-break: break-all; }
 table.sc tr.chg td.aft { color: var(--ink); font-weight: 560; background: var(--accent-soft); }
-table.sc tr.same td.aft::after { content: "  same"; color: var(--faint); font-size: 11px; font-weight: 400; }
+table.sc tr.same:not(.custom) td.aft::after { content: "  same"; color: var(--faint); font-size: 11px; font-weight: 400; }
 table.sc td.na { color: var(--faint); font-style: italic; }
 table.sc td.unc { color: var(--med); }
 table.sc td.fl { white-space: nowrap; text-align: right; padding-right: 14px; }
@@ -266,6 +266,26 @@ table.sc tr.note td { padding: 0 14px 8px 16px; background: var(--high-soft); bo
 .scard.done:not(.peek) > :not(.shd), .scard.done:not(.peek) .shd .subj, .scard.done:not(.peek) .shd .rule { display: none; }
 .scard.done:not(.peek) .stitle { opacity: .55; font-size: 14px; }
 .scard.done:not(.peek) .shd { cursor: pointer; padding-top: 9px; padding-bottom: 9px; }
+
+/* ---------- probe runner ---------- */
+table.sc .ran { display: block; margin-top: 4px; font-family: var(--mono); font-size: 11.5px; color: var(--ink); font-weight: 500; word-break: break-word; }
+table.sc .ran::before { content: "ran → "; color: var(--faint); font-family: var(--sans); font-size: 10.5px; }
+table.sc .ran.rerr { color: var(--del-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+table.sc .stale-pred { color: var(--faint); text-decoration: line-through; }
+table.sc .ran.na { color: var(--faint); }
+table.sc .mism { display: block; margin-top: 4px; font-size: 11.5px; color: var(--med); font-weight: 600; }
+table.sc tr.mismatch td { box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--med) 7%, transparent); }
+table.sc tr.custom td:first-child::before { content: "yours · "; color: var(--accent); font-size: 10.5px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; }
+table.sc .inp.edit { cursor: text; border-bottom: 1px dashed var(--line); }
+table.sc .inp.edit:hover { color: var(--accent); border-color: var(--accent); }
+table.sc input.inpbox, .addcase input { width: 100%; font: 11.5px var(--mono); color: var(--ink); background: var(--panel-2); border: 1px solid var(--accent); border-radius: 5px; padding: 3px 6px; margin-top: 3px; }
+.addcase { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto auto; gap: 8px; align-items: center; padding: 8px 16px; border-top: 1px solid var(--line-2); background: var(--panel-2); }
+.addcase input { margin: 0; border-color: var(--line); font-family: var(--sans); font-size: 13px; }
+.addcase input.j { font-family: var(--mono); font-size: 12px; }
+.probe-err { padding: 8px 16px; font-size: 12.5px; color: var(--del-ink); background: var(--del-bg); border-top: 1px solid var(--line-2); white-space: pre-wrap; font-family: var(--mono); }
+.probe-info { font-size: 11.5px; color: var(--faint); }
+.btn.run { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+@media (max-width: 900px) { .addcase { grid-template-columns: 1fr; } }
 
 /* ---------- comprehension ---------- */
 .qrow { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--line-2); align-items: start; }
@@ -620,9 +640,13 @@ function loadReviewed() {
   try { reviewed = JSON.parse(localStorage.getItem(storeKey()) || "{}") || {}; } catch { reviewed = {}; }
   try { dverdicts = JSON.parse(localStorage.getItem(storeKey() + ":decisions") || "{}") || {}; } catch { dverdicts = {}; }
   try { flags = JSON.parse(localStorage.getItem(storeKey() + ":flags") || "{}") || {}; } catch { flags = {}; }
+  try { probeEdits = JSON.parse(localStorage.getItem(storeKey() + ":probes") || "{}") || {}; } catch { probeEdits = {}; }
 }
 let dverdicts = {};                // decision id -> {v: "agree"|"question"|"disagree", note, at, resolved}
 let flags = {};                    // "row:<scenario>:<i>" | "q:<question>" -> {note}: things to ask the agent about
+let probeEdits = {};               // scenario id -> {rows: {i: input}, extra: [{case, input}]}: your inputs, kept per branch
+const probeRuns = {}, probeBusy = {}, probeOK = new Set();   // results live for this page only: re-running is cheap
+function saveProbeEdits() { try { localStorage.setItem(storeKey() + ":probes", JSON.stringify(probeEdits)); } catch {} }
 function saveVerdicts() { try { localStorage.setItem(storeKey() + ":decisions", JSON.stringify(dverdicts)); } catch {} updateProgress(); updateFeedback(); }
 function saveFlags() { try { localStorage.setItem(storeKey() + ":flags", JSON.stringify(flags)); } catch {} updateFeedback(); }
 function saveReviewed() { try { localStorage.setItem(storeKey(), JSON.stringify(reviewed)); } catch {} updateProgress(); }
@@ -1254,38 +1278,182 @@ function inputText(inp) {
   if (!inp || !Object.keys(inp).length) return null;
   return Object.entries(inp).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(", ");
 }
+function probeRows(sc) {
+  const ed = probeEdits[sc.id] || {};
+  const rows = sc.rows.map((r, i) => ({ ...r, i, input: (ed.rows || {})[i] !== undefined ? ed.rows[i] : r.input, edited: (ed.rows || {})[i] !== undefined }));
+  (ed.extra || []).forEach((x, j) => rows.push({ case: x.case || `case ${j + 1}`, input: x.input, before: "", after: "", changed: null, custom: true, j, i: sc.rows.length + j }));
+  return rows;
+}
+async function runProbe(sc) {
+  const t = sc.target;
+  if (!t || probeBusy[sc.id]) return;
+  if (!t.pure && !probeOK.has(sc.id) && !confirm(`Run ${t.function}() from ${t.file} on the old and new code?\n\nThis executes your code locally with your environment. Claude didn't mark it pure, so it may touch a database, the network or files.`)) return;
+  probeOK.add(sc.id);
+  probeBusy[sc.id] = true; redrawScenario(sc);
+  const rows = probeRows(sc);
+  try {
+    const r = await fetch("/api/probe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: sc.id, cases: rows.map(x => ({ input: x.input })) }) });
+    const body = await r.json();
+    probeRuns[sc.id] = r.ok ? { ...body, at: new Date() } : { error: body.error || ("HTTP " + r.status) };
+  } catch (e) { probeRuns[sc.id] = { error: "couldn't reach the glance server" }; }
+  probeBusy[sc.id] = false;
+  redrawScenario(sc);
+}
+function redrawScenario(sc) { const el = document.getElementById("sc-" + sc.id); if (el) el.replaceWith(scenarioCard(sc)); }
+function sideResult(run, side, i) {
+  const s = (run || {})[side];
+  if (!s) return null;
+  if (s.missing) return { na: true, value: side === "before" ? "didn't exist" : "doesn't exist" };
+  if (s.error) return { err: true, value: null };
+  return (s.results || [])[i] || null;
+}
+// Does Claude's predicted outcome match what the code actually returned? true / false, or null when the
+// prediction is prose we can't compare ("margin_call_at = now"). Numbers compare numerically (0.060 == 0.06,
+// "6%" == 0.06, "$25" == 25); an error prediction matches a raise.
+function predictionMatches(pred, res) {
+  if (!res || res.err) return null;
+  const p = String(pred || "").trim().toLowerCase();
+  if (!p || p === "—" || p.startsWith("unclear")) return null;
+  if (res.na) return p.startsWith("n/a") ? true : null;
+  if (p.startsWith("n/a")) return false;
+  if (res.ok === false) return /error|raise|throw|reject|exception|fail|4\d\d|5\d\d/.test(p) ? true : (/^[-+$]?\d|^(true|false|none|null)\b/.test(p) ? false : null);
+  const actual = String(res.value).replace(/^"|"$/g, "").trim().toLowerCase();
+  const num = x => { const m = String(x).replace(/[$,]/g, "").match(/^[-+]?\d*\.?\d+(e[-+]?\d+)?(%)?/i); return m ? { v: parseFloat(m[0]) / (m[2] ? 100 : 1), raw: parseFloat(m[0]) } : null; };
+  const pn = num(p), an = num(actual);
+  if (pn && an && /^[-+]?\d*\.?\d+(e[-+]?\d+)?$/i.test(actual)) return Math.abs(pn.v - an.v) < 1e-9 || Math.abs(pn.raw - an.v) < 1e-9;
+  for (const [a, b] of [["true", "true"], ["false", "false"], ["none", "none"], ["null", "none"]]) if (p.startsWith(a)) return actual === b || actual === a;
+  if (/^["'].*["']$/.test(String(pred).trim())) return String(pred).trim().slice(1, -1).toLowerCase() === actual;
+  return null;
+}
+function pyLit(v) {
+  if (v === null || v === undefined) return "None";
+  if (v === true) return "True"; if (v === false) return "False";
+  if (Array.isArray(v)) return "[" + v.map(pyLit).join(", ") + "]";
+  if (typeof v === "object") return "{" + Object.entries(v).map(([k, x]) => JSON.stringify(k) + ": " + pyLit(x)).join(", ") + "}";
+  return JSON.stringify(v);
+}
+function testCode(sc) {
+  const run = probeRuns[sc.id] || {}, t = sc.target, rows = probeRows(sc);
+  const after = (run.after || {}).results || [];
+  const slug = x => String(x).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40) || "case";
+  if (t.file.endsWith(".py")) {
+    const L = [`# Generated by glance from "${sc.title}": pins what ${t.function}() does today.`, "import pytest"];
+    if (after.some(r => (r.repr || "").includes("Decimal("))) L.push("from decimal import Decimal");
+    L.push(`from ${run.after?.module || t.file.replace(/\.py$/, "").replace(/\//g, ".")} import ${t.function}`, "");
+    const used = new Set();
+    rows.forEach((r, i) => {
+      const res = after[i]; if (!res) return;
+      let name = `test_${t.function}_${slug(r.case)}`; while (used.has(name)) name += "_"; used.add(name);
+      const call = `${t.function}(**${pyLit(r.input || {})})`;
+      L.push("", "", `def ${name}():`);
+      if (!res.ok) L.push(`    with pytest.raises(Exception) as exc:`, `        ${call}`, `    assert type(exc.value).__name__ == ${JSON.stringify(res.raised)}`);
+      else if ((res.repr || "").startsWith("<")) L.push(`    ${call}  # returns ${res.repr.slice(0, 60)}: add an assertion`);
+      else L.push(`    assert ${call} == ${res.repr}`);
+    });
+    return L.join("\n") + "\n";
+  }
+  const params = t.params || [];
+  const L = [`// Generated by glance from "${sc.title}": pins what ${t.function}() does today.`, `import { ${t.function} } from "./${t.file}"; // adjust the path`, ""];
+  rows.forEach((r, i) => {
+    const res = after[i]; if (!res) return;
+    const args = (params.length ? params.map(p => JSON.stringify((r.input || {})[p])) : [JSON.stringify(r.input || {})]).join(", ").replace(/(, undefined)+$/, "");
+    if (!res.ok) L.push(`test(${JSON.stringify(r.case)}, async () => {`, `  await expect(async () => ${t.function}(${args})).rejects.toThrow();`, `});`);
+    else L.push(`test(${JSON.stringify(r.case)}, async () => {`, `  expect(await ${t.function}(${args})).toEqual(${res.value});`, `});`);
+  });
+  return L.join("\n") + "\n";
+}
+function editInput(sc, row, span) {
+  const box = h("input", { class: "inpbox", value: JSON.stringify(row.input ?? {}), title: "Edit the arguments as JSON. Enter runs it, Esc cancels." });
+  span.replaceWith(box); box.focus(); box.select();
+  box.addEventListener("keydown", e => {
+    if (e.key === "Escape") { redrawScenario(sc); return; }
+    if (e.key !== "Enter") return;
+    let v; try { v = JSON.parse(box.value); } catch { toast("That isn't valid JSON"); return; }
+    if (v === null || typeof v !== "object" || Array.isArray(v)) { toast("Use an object of arguments, like {\"amount\": 5000}"); return; }
+    const ed = probeEdits[sc.id] = probeEdits[sc.id] || {};
+    if (row.custom) ed.extra[row.j].input = v; else (ed.rows = ed.rows || {})[row.i] = v;
+    saveProbeEdits(); runProbe(sc);
+  });
+}
 function scenarioCard(sc) {
   const units = Object.fromEntries(((R.story || {}).units || []).map(u => [u.id, u]));
   const card = h("div", { class: "card scard", id: "sc-" + sc.id });
+  const t = sc.target, canRun = !!t && !STATIC, run = probeRuns[sc.id];
   const meta = [];
   if (sc.stale) meta.push(h("span", { class: "verdict stale", title: "The code behind this table changed since it was written" }, "code changed"));
   const changed = sc.rows.filter(r => r.changed).length;
   card.append(h("div", { class: "shd" }, check(sc.rid, card),
     h("div", {}, h("div", { class: "stitle" }, sc.title), sc.subject ? h("div", { class: "subj" }, sc.subject) : null, sc.rule ? h("div", { class: "rule" }, sc.rule) : null),
     h("div", { class: "src", style: "text-align:right" }, `${changed} of ${sc.rows.length} change`, ...meta)));
-  const t = h("table", { class: "sc" }, h("tr", {}, h("th", {}, "Case"), h("th", {}, "Before"), h("th", {}, "After"), h("th", {}, "")));
-  sc.rows.forEach((r, i) => {
-    const key = `row:${sc.id}:${i}`;
-    const tr = h("tr", { class: (r.changed ? "chg" : "same") + (flags[key] ? " flagged" : "") });
-    const inp = inputText(r.input);
+  const tbl = h("table", { class: "sc" }, h("tr", {}, h("th", {}, "Case"), h("th", {}, "Before"), h("th", {}, "After"), h("th", {}, "")));
+  let mismatches = 0;
+  for (const r of probeRows(sc)) {
+    const key = `row:${sc.id}:${r.i}`;
+    const b = sideResult(run, "before", r.i), a = sideResult(run, "after", r.i);
+    const actualChanged = b && a && !a.err && !b.err ? (b.na || b.value !== a.value) : null;
+    const pa = r.custom || r.edited ? null : predictionMatches(r.after, a), pb = r.custom || r.edited ? null : predictionMatches(r.before, b);
+    let mism = null;
+    if (pa === false) mism = `⚠ Claude predicted “${r.after}”; it returns ${a.value}`;
+    else if (pb === false) mism = `⚠ Before: Claude predicted “${r.before}”; it returned ${b.value}`;
+    else if (pa === null && pb === null && !r.custom && !r.edited && actualChanged !== null && actualChanged !== r.changed)
+      mism = r.changed ? "⚠ Claude said this changes; running it, it doesn't" : "⚠ Claude said this stays the same; running it, it changes";
+    if (mism) mismatches++;
+    const mine = r.custom || r.edited;      // your inputs: Claude's prediction doesn't apply, what actually happened does
+    const cls = (mine ? (actualChanged ? "chg" : actualChanged === false ? "same" : "") : (r.changed ? "chg" : "same")) + (flags[key] ? " flagged" : "") + (mism ? " mismatch" : "") + (r.custom ? " custom" : "");
+    const tr = h("tr", { class: cls });
+    const inpText = inputText(r.input) || (canRun ? "(no arguments)" : null);
+    const inp = inpText ? h("span", { class: "inp" + (canRun ? " edit" : ""), title: canRun ? "Click to change the inputs and re-run" : "" }, inpText + (r.edited ? "  (edited)" : "")) : null;
+    if (inp && canRun) inp.addEventListener("click", () => editInput(sc, r, inp));
+    const ran = x => x ? h("span", { class: "ran" + (x.na ? " na" : x.ok === false ? " rerr" : ""), title: x.ok === false ? x.value : null }, x.value) : null;
+    const pred = text => r.custom ? "" : r.edited ? h("span", { class: "stale-pred", title: "Claude's prediction was for the original input" }, text) : text;
     const btn = h("button", { class: "flagbtn" + (flags[key] ? " on" : ""), title: "Not what I expect: add this row to the feedback for the agent" }, flags[key] ? "⚑ flagged" : "⚑");
-    btn.addEventListener("click", () => {
-      if (flags[key]) delete flags[key]; else flags[key] = { note: "" };
-      saveFlags();
-      card.replaceWith(scenarioCard(sc));
-    });
-    tr.append(h("td", {}, r.case, inp ? h("span", { class: "inp" }, inp) : null), h("td", { class: cellClass(r.before, "bef") }, r.before),
-      h("td", { class: cellClass(r.after, "aft") }, r.after), h("td", { class: "fl" }, btn));
-    t.append(tr);
-    if (flags[key]) {
+    btn.addEventListener("click", () => { if (flags[key]) delete flags[key]; else flags[key] = { note: "" }; saveFlags(); redrawScenario(sc); });
+    const del = r.custom ? h("button", { class: "flagbtn", title: "Remove your case", onclick: () => { probeEdits[sc.id].extra.splice(r.j, 1); saveProbeEdits(); redrawScenario(sc); } }, "✕") : null;
+    tr.append(h("td", {}, r.case, inp),
+      h("td", { class: cellClass(r.before, "bef") }, pred(r.before), ran(b)),
+      h("td", { class: cellClass(r.after, "aft") }, pred(r.after), ran(a),
+        mism ? h("span", { class: "mism" }, mism) : null),
+      h("td", { class: "fl" }, r.custom ? del : btn));
+    tbl.append(tr);
+    if (flags[key] && !r.custom) {
       const note = h("input", { class: "flagnote", placeholder: "What did you expect instead?" });
       note.value = flags[key].note || "";
       note.addEventListener("input", () => { flags[key].note = note.value; saveFlags(); });
-      t.append(h("tr", { class: "note" }, h("td", { colspan: 4 }, note)));
+      tbl.append(h("tr", { class: "note" }, h("td", { colspan: 4 }, note)));
     }
-  });
-  card.append(t);
+  }
+  card.append(tbl);
+  if (run) {
+    const errs = ["before", "after"].map(sd => run[sd] && run[sd].error && !run[sd].missing ? `${sd}: ${run[sd].error}` : null).filter(Boolean);
+    if (run.error) errs.unshift(run.error);
+    if (errs.length) card.append(h("div", { class: "probe-err" }, errs.join("\n")));
+  }
+  if (canRun) {
+    const add = h("button", { class: "toggle" }, "+ add a case");
+    add.addEventListener("click", () => {
+      const lbl = h("input", { placeholder: "What this case is (e.g. amount just under the limit)" });
+      const js = h("input", { class: "j", value: JSON.stringify(Object.fromEntries((t.params || []).map(p => [p, null]))) });
+      const go = () => {
+        let v; try { v = JSON.parse(js.value); } catch { toast("Arguments must be JSON"); return; }
+        const ed = probeEdits[sc.id] = probeEdits[sc.id] || {};
+        (ed.extra = ed.extra || []).push({ case: lbl.value.trim() || "my case", input: v });
+        saveProbeEdits(); runProbe(sc);
+      };
+      js.addEventListener("keydown", e => { if (e.key === "Enter") go(); });
+      add.replaceWith(h("div", { class: "addcase" }, lbl, js, h("button", { class: "btn run", onclick: go }, "Run"), h("button", { class: "toggle", onclick: () => redrawScenario(sc) }, "cancel")));
+      lbl.focus();
+    });
+    card.append(h("div", { style: "padding:6px 16px;border-top:1px solid var(--line-2)" }, add));
+  }
   const foot = h("div", { class: "dfoot" });
+  if (canRun) {
+    foot.append(h("button", { class: "btn run", disabled: !!probeBusy[sc.id], title: `Call ${t.function}() from ${t.file} with each row's inputs, on the old code and the new`, onclick: () => runProbe(sc) },
+      probeBusy[sc.id] ? "Running…" : run ? "▶ Run again" : "▶ Run before & after"));
+    if (run && !run.error && run.after && !run.after.error) foot.append(h("button", { class: "toggle", title: "Copy these cases as tests that pin today's behavior", onclick: async () => {
+      try { await navigator.clipboard.writeText(testCode(sc)); toast("Test file copied"); } catch { toast("Couldn't copy to the clipboard"); } } }, "copy as test"));
+    if (run && run.at) foot.append(h("span", { class: "probe-info", title: run.interpreter || "" }, `ran ${run.at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` + (mismatches ? ` · ${mismatches} differ from Claude's prediction` : " · matches Claude's prediction")));
+    else if (!t.pure) foot.append(h("span", { class: "probe-info" }, "may have side effects: asks first"));
+  } else if (t && STATIC) foot.append(h("span", { class: "probe-info" }, `runnable from the live page: ${t.function}() in ${t.file}`));
   for (const id of sc.units || []) if (units[id]) foot.append(h("span", { class: "chip", title: "Jump to " + units[id].name, onclick: () => jumpUnit(id) }, units[id].name));
   foot.append(h("span", { class: "spacer" }), codeToggle(foot, sc.hunks, "show code") || h("span"), loc(sc.file, sc.line) || h("span"));
   card.append(foot);

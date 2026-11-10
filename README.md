@@ -30,6 +30,25 @@ glance                     # working tree (incl. uncommitted) vs. merge-base wit
 
 The page shows static results immediately and fills in the model pass when it lands.
 
+## Understanding the change, not just reading it
+
+With the model pass, the page reads top to bottom as: the story → decisions → map → behavior → comprehension
+→ step by step. Three meters in the top bar track **Read**, **Decisions** and **Understood**; when all three
+are full it says **Ready to merge**.
+
+- **Decisions**: the judgement calls in the change (chose / instead of / tradeoff / stakes). Agree, question or
+  disagree; questions and disagreements stay open until you resolve them.
+- **Map**: new and changed routes, jobs, functions, schemas and tables in columns (entry → logic → shapes →
+  storage), with field-level diffs. Every line is a real reference in the code. Click a box to trace what it
+  touches; pick a flow to walk it step by step with the data's shape at each step.
+- **What behaves differently**: before/after tables of concrete inputs, boundary cases included. When a table
+  maps to one function, **▶ Run before & after** calls it for real on the base commit and on your code (with
+  the project's `.venv` Python, or node / `tsx`), flags rows where Claude's prediction is wrong, lets you edit
+  inputs or add cases, and copies the cases as a test file. It runs your code locally, so anything Claude
+  didn't mark pure asks first. The base commit is extracted to `~/.cache/glance/snapshots`, never into the repo.
+- **Can you answer these?**: questions you should be able to answer before merging, answers hidden.
+- **Copy feedback**: open questions, disagreements, flagged rows and ask-the-agent questions as one prompt.
+
 ## Usage
 
 ```

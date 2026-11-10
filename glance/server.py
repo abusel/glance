@@ -134,6 +134,22 @@ def make_handler(state: State):
                 if not state.recheck or not state.recheck(cid):
                     return self._send(409, b'{"error":"unknown concern, already re-checking, or no AI available"}')
                 return self._send(202, b'{"ok":true}')
+            if u.path == "/api/probe":
+                if not self._same_origin():
+                    return self._send(403, b'{"error":"cross-origin"}')
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    req = json.loads(self.rfile.read(min(n, 200_000)) or b"{}")
+                    sid, cases = str(req.get("id") or ""), list(req.get("cases") or [])
+                    sides = [x for x in req.get("sides") or ["before", "after"] if x in ("before", "after")]
+                except (ValueError, TypeError):
+                    return self._send(400, b'{"error":"bad request"}')
+                rep = state.get()
+                sc = next((x for x in (rep.get("llm") or {}).get("scenarios") or [] if x.get("id") == sid), None)
+                if not sc or not sc.get("target"):
+                    return self._send(404, b'{"error":"no runnable target for this table"}')
+                from . import probe
+                return self._send(200, json.dumps(probe.run(rep, sc["target"], cases, sides)).encode())
             if u.path == "/api/llm":
                 if not self._same_origin():
                     return self._send(403, b'{"error":"cross-origin"}')

@@ -70,6 +70,10 @@ and what happens before and after this change:
   "n/a (didn't exist)" for before when the behavior is new and "n/a (removed)" for after when it's gone.
 - Work outcomes out by reading the code. Never guess: if the code doesn't determine it, write "unclear: <why>".
 - hunks: where the new behavior lives. units: story unit ids involved (may be empty).
+- target: when the rows can be reproduced by calling ONE module-level function with JSON-able arguments,
+  {"file": "path/in/repo.py", "function": "name", "pure": true|false}, and then every row's "input" uses exactly
+  that function's parameter names. pure = false if it touches a database, network, filesystem, queue or the
+  clock. Otherwise "target": null. The reviewer can run these rows against the old and new code.
 Skip scenarios for pure refactors, plumbing and CRUD with no rules.
 
 Flows trace data through the change end to end, so a reviewer sees how the pieces connect. Write 1-4 flows,
@@ -119,6 +123,7 @@ Return ONLY a JSON object, no prose, matching:
   "decisions": [{"title": "...", "chose": "...", "alternative": "...", "tradeoff": "...", "weight": "high|medium|low",
                  "hunks": ["h_..."], "units": ["u.."]}],
   "scenarios": [{"title": "...", "subject": "...", "rule": "...", "hunks": ["h_..."], "units": ["u.."],
+                 "target": {"file": "...", "function": "...", "pure": true} | null,
                  "rows": [{"case": "...", "input": {} | null, "before": "...", "after": "..."}]}],
   "questions": [{"q": "...", "answer": "...", "hunks": ["h_..."]}],
   "flows": [{"title": "...", "trigger": "...", "steps": [{"unit": "u..", "text": "...", "data": "..."}]}],
@@ -344,7 +349,8 @@ def ground_scenarios(items: list, units: set[str]) -> list[dict]:
             continue
         item = {"title": str(sc["title"]).strip()[:200], "subject": str(sc.get("subject") or "").strip()[:200],
                 "rule": str(sc.get("rule") or "").strip()[:400], "rows": rows[:10], "hunks": sc["hunks"],
-                "units": [u for u in sc.get("units") or [] if u in units]}
+                "units": [u for u in sc.get("units") or [] if u in units],
+                "target": sc.get("target") if isinstance(sc.get("target"), dict) else None}
         item["id"] = "s_" + hashlib.sha1(f"{item['title']}|{item['subject']}".encode()).hexdigest()[:10]
         out.append(item)
     return out[:5]
@@ -382,6 +388,9 @@ def attach_evidence(result: dict, report: dict) -> dict:
     hunks = {h["id"]: (f["path"], h) for f in report["files"] for h in f["hunks"]}
     for d in result.get("decisions") or []:
         d["id"] = _decision_id(d)
+    from .probe import resolve_target
+    for sc in result.get("scenarios") or []:
+        sc["target"] = resolve_target(sc, report)     # checked against the real change, or None
     for key in ("decisions", "scenarios", "questions"):
         for d in result.get(key) or []:
             d["fingerprint"] = {hid: _hunk_print(hunks[hid][1]) for hid in d["hunks"] if hid in hunks}
