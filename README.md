@@ -81,9 +81,11 @@ Reports are written to `.glance/` (auto-added to `.git/info/exclude`, your `.git
 
 ### In Claude Code
 
-Copy `.claude/commands/glance.md` into your repo (or `~/.claude/commands/`) and run `/glance`. Claude runs
-`glance --format md --llm none`, then verifies the high-risk flags against the code and walks you through
-business-logic and contract changes.
+With a `/glance` skill in `~/.claude/skills/glance/`, describe what to compare in plain words:
+`/glance compare feature-x to main`, `/glance PR 123`, `/glance the worktree at ../bug-123 against develop`.
+Claude checks the refs exist, runs glance and gives you the link to the page. Add "in chat" to get a written
+review in the conversation instead (`glance --format md --llm none`, with each high-risk flag checked against
+the code).
 
 ## What it extracts
 
