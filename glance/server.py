@@ -25,6 +25,9 @@ class State:
         self.run_model: Callable[[], bool] | None = None
         self.set_intent: Callable[[str], str] | None = None
         self.recheck: Callable[[str], bool] | None = None
+        self.branches: Callable[[], dict[str, Any]] | None = None
+        self.switch: Callable[[str | None, str | None], str | None] | None = None
+        self.switch_error: str | None = None
 
     def get(self) -> dict[str, Any]:
         with self.lock:
@@ -59,7 +62,13 @@ def make_handler(state: State):
             if u.path == "/api/report":
                 body = dict(state.get())
                 body["_rebuilding"] = state.rebuilding
+                body["_switch_error"] = state.switch_error
+                body["_can_switch"] = state.switch is not None
                 return self._send(200, json.dumps(body).encode())
+            if u.path == "/api/branches":
+                if not state.branches:
+                    return self._send(404, b'{"error":"not available"}')
+                return self._send(200, json.dumps(state.branches()).encode())
             if u.path == "/api/file":
                 q = parse_qs(u.query)
                 path = (q.get("path") or [""])[0]
@@ -150,6 +159,22 @@ def make_handler(state: State):
                     return self._send(404, b'{"error":"no runnable target for this table"}')
                 from . import probe
                 return self._send(200, json.dumps(probe.run(rep, sc["target"], cases, sides)).encode())
+            if u.path == "/api/switch":
+                if not self._same_origin():
+                    return self._send(403, b'{"error":"cross-origin"}')
+                if not state.switch:
+                    return self._send(404, b'{"error":"not available"}')
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    req = json.loads(self.rfile.read(min(n, 10_000)) or b"{}")
+                    head = str(req["head"]).strip() if req.get("head") else None
+                    base = str(req["base"]).strip() if req.get("base") else None
+                except (ValueError, TypeError, AttributeError):
+                    return self._send(400, b'{"error":"bad request"}')
+                err = state.switch(head, base)
+                if err:
+                    return self._send(409, json.dumps({"error": err}).encode())
+                return self._send(202, b'{"ok":true}')
             if u.path == "/api/llm":
                 if not self._same_origin():
                     return self._send(403, b'{"error":"cross-origin"}')

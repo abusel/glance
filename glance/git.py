@@ -54,6 +54,22 @@ def current_branch(repo: Path) -> str:
     return git(repo, "rev-parse", "--abbrev-ref", "HEAD", check=False).strip() or "HEAD"
 
 
+def list_branches(repo: Path) -> list[dict]:
+    """Local branches, plus remote branches with no local branch of the same name; newest commit first."""
+    out = git(repo, "for-each-ref", "--sort=-committerdate",
+              "--format=%(refname)%00%(refname:short)%00%(committerdate:unix)%00%(subject)",
+              "refs/heads", "refs/remotes", check=False)
+    rows = [line.split("\0") for line in out.splitlines() if line.count("\0") == 3]
+    local = {short for full, short, _, _ in rows if full.startswith("refs/heads/")}
+    branches = []
+    for full, short, ts, subject in rows:
+        remote = full.startswith("refs/remotes/")
+        if remote and (full.endswith("/HEAD") or short.split("/", 1)[-1] in local):
+            continue
+        branches.append({"name": short, "remote": remote, "date": int(ts or 0), "subject": subject})
+    return branches
+
+
 # ---------------------------------------------------------------- classification
 
 TS_EXT = {".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"}

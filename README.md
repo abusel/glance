@@ -75,7 +75,9 @@ glance serve                            # reopen the last report
 ```
 
 In the page: make a call or check items off as you go (progress persists per branch), open any item for its
-detail and hunks, press **r** or **↻ Refresh** after you or an agent edits the code.
+detail and hunks, press **r** or **↻ Refresh** after you or an agent edits the code. Click the branch name in the
+top bar to review another branch, the working tree or a different base without restarting; it lists local branches
+and remote-only ones, newest commit first.
 
 Reports are written to `.glance/` (auto-added to `.git/info/exclude`, your `.gitignore` is untouched).
 

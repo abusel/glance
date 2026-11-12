@@ -654,3 +654,92 @@ def test_assumptions_are_verified_against_the_code(py_report):
     assert {a["status"] for a in carry_over(old, copy.deepcopy(py_report))["assumptions"]} == {"none", "enforced", "unverified"}
     md = render({**py_report, "llm": res})
     assert "What this relies on" in md and "nothing enforces this" in md and "couldn't verify" in md
+
+
+def test_list_branches_hides_remote_duplicates(tmp_path):
+    from fixtures import _git
+
+    from glance.git import list_branches
+
+    repo = make_python_repo(tmp_path / "py")
+    head = subprocess_out(repo, "rev-parse", "HEAD")
+    _git(repo, "update-ref", "refs/remotes/origin/main", head)            # has a local twin
+    _git(repo, "update-ref", "refs/remotes/origin/feature/remote-only", head)
+    _git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    by_name = {b["name"]: b for b in list_branches(repo)}
+    assert set(by_name) == {"main", "ai/margin-calls", "origin/feature/remote-only"}
+    assert by_name["origin/feature/remote-only"]["remote"] and not by_name["main"]["remote"]
+    assert by_name["ai/margin-calls"]["subject"].startswith("Add margin calls")
+
+
+def subprocess_out(repo, *args):
+    import subprocess
+
+    return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+
+
+def test_switch_branch_without_restarting(tmp_path, monkeypatch):
+    import http.client
+    import threading
+    import time
+    from http.server import ThreadingHTTPServer
+
+    from fixtures import _commit, _git, _write
+
+    from glance import cli
+    from glance.server import make_handler
+
+    repo = make_python_repo(tmp_path / "py")
+    _git(repo, "checkout", "-q", "-b", "ai/other", "main")
+    _write(repo, {"app/other.py": "def other():\n    return 1\n"})
+    _commit(repo, "Add other")
+    _git(repo, "checkout", "-q", "ai/margin-calls")
+
+    captured = {}
+    monkeypatch.setattr(cli, "serve", lambda state, **kw: captured.setdefault("state", state))
+    assert main(["--repo", str(repo), "--llm", "none", "--no-open", "--base", "main",
+                 "--intent", "margin calls", "ai/margin-calls"]) == 0
+    state = captured["state"]
+
+    def wait():
+        for _ in range(200):
+            if not state.rebuilding:
+                return
+            time.sleep(0.05)
+        raise AssertionError("switch never finished")
+
+    assert {b["name"] for b in state.branches()["branches"]} >= {"main", "ai/margin-calls", "ai/other"}
+    assert state.switch("nope/missing", None) == "unknown ref: nope/missing"
+
+    assert state.switch("ai/other", "main") is None
+    wait()
+    rep = state.get()
+    assert state.switch_error is None and rep["head"]["ref"] == "ai/other"
+    assert [f["path"] for f in rep["files"]] == ["app/other.py"]
+    assert not rep.get("intent")                      # --intent belonged to the branch glance started on
+
+    before = rep["id"]
+    assert state.switch("main", "main") is None        # nothing to review: keep the current report
+    wait()
+    assert "no changes" in state.switch_error and state.get()["id"] == before
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(state))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        c = http.client.HTTPConnection("127.0.0.1", srv.server_port)
+        c.request("GET", "/api/branches")
+        r = c.getresponse()
+        assert r.status == 200 and json.loads(r.read())["head"] == "ai/other"
+        c.request("POST", "/api/switch", json.dumps({"head": "main"}), {"Origin": "https://evil.example"})
+        r = c.getresponse(); r.read()
+        assert r.status == 403
+        c.request("POST", "/api/switch", json.dumps({"head": "nope/missing"}))
+        r = c.getresponse()
+        assert r.status == 409 and "unknown ref" in json.loads(r.read())["error"]
+        c.request("POST", "/api/switch", json.dumps({"head": "ai/margin-calls", "base": "main"}))
+        r = c.getresponse(); r.read()
+        assert r.status == 202
+        wait()
+        assert state.get()["head"]["ref"] == "ai/margin-calls"
+    finally:
+        srv.shutdown()

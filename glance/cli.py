@@ -22,7 +22,7 @@ from pathlib import Path
 
 from . import __version__, llm
 from .analyze import analyze
-from .git import GitError, collect, git, repo_root
+from .git import GitError, collect, git, list_branches, ref_exists, repo_root
 from .render_md import render
 from .server import State, serve
 
@@ -240,6 +240,50 @@ def cmd_review(args) -> int:
         return True
 
     state.recheck = recheck
+
+    def branches() -> dict:
+        cur = state.get()
+        return {"branches": list_branches(repo), "base": cur["base"]["ref"],
+                "head": None if cur["head"]["worktree"] else cur["head"]["ref"]}
+
+    state.branches = branches
+
+    def switch(head: str | None, base: str | None) -> str | None:
+        """Review a different branch (None = working tree) without restarting; returns an error or None."""
+        if state.rebuilding:
+            return "already loading a report"
+        for ref in (head, base):
+            if ref and not ref_exists(repo, ref):
+                return f"unknown ref: {ref}"
+        state.rebuilding, state.switch_error = True, None
+
+        def work() -> None:
+            saved = (args.head, args.base, args.intent, args.intent_file)
+            # --intent described the branch glance started on; other branches use their saved intent file.
+            args.head, args.base, args.intent, args.intent_file = head, base or args.base, None, None
+            try:
+                rep = build(args, repo)
+                if not rep["files"]:
+                    raise GitError(f"no changes between {rep['base']['ref']} and {rep['head']['ref']}")
+            except Exception as e:  # noqa: BLE001 — any failure keeps the current report and is shown in the page
+                args.head, args.base, args.intent, args.intent_file = saved
+                state.switch_error = str(e)
+                state.rebuilding = False
+                return
+            if run_llm:
+                rep["llm"] = {"status": "running", "provider": llm.available_provider(args.llm)}
+            else:
+                rep["llm"] = llm.run(rep, provider="none" if args.llm == "none" else args.llm)
+            state.set(rep)
+            _write(repo, rep)
+            state.rebuilding = False
+            if run_llm:
+                model_pass(rep)
+
+        threading.Thread(target=work, daemon=True).start()
+        return None
+
+    state.switch = switch
     _write(repo, report)
     if run_llm:
         report["llm"] = {"status": "running", "provider": llm.available_provider(args.llm)}

@@ -42,8 +42,33 @@ button { font: inherit; color: inherit; }
 .brand { font-weight: 700; letter-spacing: -.02em; font-size: 16px; display: flex; align-items: center; gap: 7px; }
 .brand i { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); display: inline-block; box-shadow: 0 0 0 3px var(--accent-soft); }
 .ref { font-family: var(--mono); font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46ch; }
+.ref.sw { display: flex; align-items: center; gap: 1ch; max-width: 78ch; min-width: 0; }
+.ref.sw > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; }
+.ref.sw > b { flex-shrink: 3; }
+.ref.sw > .refbtn { flex-shrink: 0; max-width: 52ch; }
 .ref b { color: var(--ink); font-weight: 600; }
 .spacer { flex: 1; }
+.refbtn { font: 600 12.5px var(--mono); color: var(--ink); background: none; border: 1px solid transparent; border-radius: 6px; padding: 1px 5px; margin: 0 -1px; cursor: pointer; }
+.refbtn:hover, .refbtn[aria-expanded="true"] { border-color: var(--line); background: var(--panel); }
+.refbtn .car { color: var(--faint); font-weight: 400; margin-left: 3px; }
+.switching { color: var(--accent); font-size: 12px; white-space: nowrap; }
+.switcher { position: fixed; top: 52px; left: 20px; z-index: 40; width: min(560px, calc(100vw - 32px)); max-height: min(70vh, 620px); display: none; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.14); overflow: hidden; }
+.switcher.open { display: flex; }
+.switcher .sw-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line-2); font-size: 12.5px; color: var(--muted); }
+.switcher input { font: 12.5px var(--mono); color: var(--ink); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; outline: none; }
+.switcher input:focus { border-color: var(--accent); }
+.switcher .sw-base { width: 15ch; }
+.switcher .sw-q { flex: 1; min-width: 0; }
+.switcher ul { list-style: none; margin: 0; padding: 4px; overflow-y: auto; }
+.switcher li { display: grid; grid-template-columns: 1fr auto; gap: 1px 12px; padding: 6px 9px; border-radius: 6px; cursor: pointer; }
+.switcher li.sel { background: var(--accent-soft); }
+.switcher li .nm { font: 12.5px var(--mono); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.switcher li .nm em { font: 11px var(--sans); font-style: normal; color: var(--faint); margin-left: 6px; }
+.switcher li.cur .nm::after { content: "current"; font: 600 10.5px var(--sans); color: var(--accent); margin-left: 8px; }
+.switcher li .when { font-size: 11.5px; color: var(--faint); text-align: right; white-space: nowrap; }
+.switcher li .sub { grid-column: 1 / -1; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.switcher .sw-empty { padding: 14px 12px; color: var(--muted); font-size: 12.5px; }
 .pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); background: var(--panel); white-space: nowrap; }
 .pill.h { color: var(--high); background: var(--high-soft); border-color: transparent; font-weight: 600; }
 .pill.m { color: var(--med); background: var(--med-soft); border-color: transparent; font-weight: 600; }
@@ -533,6 +558,7 @@ table.f tr.same td { color: var(--muted); }
   .rail a.sec { white-space: nowrap; gap: 6px; }
   .top-in { padding: 8px 12px; gap: 8px; }
   .ref { max-width: 100%; order: 5; flex-basis: 100%; }
+  .switcher { left: 16px; width: calc(100vw - 32px); }
   .intent { grid-template-columns: 1fr; } .intent > div { border-left: 0; border-top: 1px solid var(--line-2); }
   .ba { grid-template-columns: 1fr; } .ba > div + div { border-left: 0; border-top: 1px solid var(--line-2); }
   .routes .r { grid-template-columns: 22px 54px minmax(0, 1fr); } .routes .r > .locwrap { grid-column: 3; justify-content: flex-start; }
@@ -601,6 +627,7 @@ section.sec.sub > h2 { display: none; }
   <main id="main"><div class="empty" style="padding:40px 0">Loading report…</div></main>
 </div>
 <div class="toast" id="toast"></div>
+<div class="switcher" id="switcher" role="dialog" aria-label="Review another branch"></div>
 <button class="backbtn" id="backbtn" title="Back to where you were (Backspace)">↩ Back</button>
 <script>
 (() => {
@@ -904,14 +931,20 @@ function renderTop() {
   const top = document.getElementById("top");
   top.innerHTML = "";
   const head = R.head.worktree ? "working tree" : R.head.ref;
+  const headEl = !STATIC && R._can_switch
+    ? h("button", { class: "refbtn", id: "refbtn", title: "Review another branch", "aria-expanded": swOpen ? "true" : "false", onclick: toggleSwitcher }, head, h("span", { class: "car" }, "▾"))
+    : h("b", {}, head);
   top.append(...[
     h("div", { class: "brand" }, h("i"), "glance"),
-    h("div", { class: "ref", title: `${R.repo_path}` }, h("b", {}, R.repo), "  ", R.base.ref, " … ", h("b", {}, head), R.branch && R.head.worktree ? `  (${R.branch})` : ""),
+    !STATIC && R._can_switch
+      ? h("div", { class: "ref sw", title: `${R.repo_path}` }, h("b", {}, R.repo), h("span", {}, R.base.ref), h("span", {}, "…"), headEl, R.branch && R.head.worktree ? h("span", {}, `(${R.branch})`) : null)
+      : h("div", { class: "ref", title: `${R.repo_path}` }, h("b", {}, R.repo), "  ", R.base.ref, " … ", headEl, R.branch && R.head.worktree ? `  (${R.branch})` : ""),
+    switching ? h("span", { class: "switching" }, `Loading ${switching}…`) : null,
     h("span", { class: "pill mono" }, h("span", { class: "add" }, "+" + R.stats.additions), h("span", { class: "del" }, "−" + R.stats.deletions), h("span", { style: "color:var(--muted)" }, plural(R.stats.files, "file"))),
     h("div", { class: "spacer" }),
     h("div", { class: "meters", id: "prog" }),
     h("span", { id: "feedback" }),
-    STATIC ? null : h("button", { class: "btn", id: "refresh", title: "Re-run analysis on the current working tree", onclick: refresh }, "↻ Refresh"),
+    STATIC ? null : h("button", { class: "btn", id: "refresh", title: "Re-run analysis on the current working tree", onclick: refresh, disabled: !!switching }, "↻ Refresh"),
   ].filter(Boolean));          // DOM append() would print "null" for skipped items
   updateProgress();
   updateFeedback();
@@ -2427,6 +2460,108 @@ function observeSections() {
   }, { rootMargin: "-80px 0px -70% 0px" });
   document.querySelectorAll("section.sec").forEach(s => obs.observe(s));
 }
+
+// ------------------------------------------------------------------ branch switcher
+let swOpen = false, switching = null, swBranches = [], swSel = 0;
+const WORKTREE = { name: "", label: "working tree", note: "uncommitted changes in the checkout" };
+
+function ago(ts) {
+  const s = Date.now() / 1000 - ts;
+  if (s < 3600) return `${Math.max(1, Math.round(s / 60))}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  if (s < 86400 * 60) return `${Math.round(s / 86400)}d ago`;
+  return new Date(ts * 1000).toLocaleDateString([], { month: "short", year: "numeric" });
+}
+
+async function toggleSwitcher() {
+  if (swOpen) return closeSwitcher();
+  if (switching) return;
+  swOpen = true; swSel = 0;
+  const box = document.getElementById("switcher");
+  box.innerHTML = "";
+  const base = h("input", { class: "sw-base", value: R.base.ref, list: "sw-refs", spellcheck: "false", title: "Compare against this branch" });
+  const q = h("input", { class: "sw-q", placeholder: "Filter branches…", spellcheck: "false", autocomplete: "off" });
+  const list = h("ul", {}, h("li", { class: "sw-empty" }, "Loading branches…"));
+  box.append(h("div", { class: "sw-head" }, "base", base, q), h("datalist", { id: "sw-refs" }), list);
+  box.style.top = `${Math.max(8, document.querySelector("header.top").getBoundingClientRect().bottom + 6)}px`;
+  box.classList.add("open");
+  renderTop();
+  q.focus();
+  const pick = item => item && switchTo(item.name || null, base.value.trim() || null);
+  const draw = () => {
+    const f = q.value.trim().toLowerCase();
+    const items = [WORKTREE, ...swBranches].filter(b => !f || (b.label || b.name).toLowerCase().includes(f) || (b.subject || "").toLowerCase().includes(f));
+    swSel = Math.min(swSel, Math.max(0, items.length - 1));
+    list.innerHTML = "";
+    if (!items.length) list.append(h("li", { class: "sw-empty" }, "No matching branches"));
+    const cur = R.head.worktree ? "" : R.head.ref;
+    items.forEach((b, i) => list.append(h("li", {
+      class: [i === swSel ? "sel" : "", b.name === cur ? "cur" : ""].join(" "),
+      onmouseenter: () => { swSel = i; list.querySelectorAll("li").forEach((x, j) => x.classList.toggle("sel", j === i)); },
+      onclick: () => pick(b),
+    }, h("span", { class: "nm" }, b.label || b.name, b.remote ? h("em", {}, "remote only") : null),
+       h("span", { class: "when" }, b.date ? ago(b.date) : ""),
+       h("span", { class: "sub" }, b.note || b.subject || ""))));
+    list.querySelector("li.sel")?.scrollIntoView({ block: "nearest" });
+    return items;
+  };
+  let items = draw();
+  q.addEventListener("input", () => { swSel = 0; items = draw(); });
+  const keys = e => {
+    if (e.key === "Escape") { e.preventDefault(); closeSwitcher(); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); swSel = Math.min(swSel + 1, items.length - 1); items = draw(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); swSel = Math.max(swSel - 1, 0); items = draw(); }
+    else if (e.key === "Enter") { e.preventDefault(); pick(items[swSel]); }
+  };
+  q.addEventListener("keydown", keys);
+  base.addEventListener("keydown", e => { if (e.key === "Escape" || e.key === "Enter") keys(e); });
+  try {
+    const r = await fetch("/api/branches", { cache: "no-store" });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || "HTTP " + r.status);
+    swBranches = data.branches;
+    box.querySelector("#sw-refs").append(...swBranches.map(b => h("option", { value: b.name })));
+    if (swOpen) items = draw();
+  } catch (e) {
+    list.innerHTML = "";
+    list.append(h("li", { class: "sw-empty" }, `Couldn't list branches: ${e.message}`));
+  }
+}
+
+function closeSwitcher() {
+  swOpen = false;
+  document.getElementById("switcher").classList.remove("open");
+  if (R) renderTop();
+}
+
+async function switchTo(head, base) {
+  try {
+    const r = await fetch("/api/switch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ head, base }) });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) { toast(data.error || "Couldn't switch"); return; }
+  } catch { toast("Couldn't reach the glance server"); return; }
+  closeSwitcher();
+  switching = head || "working tree";
+  renderTop();
+  for (let i = 0; i < 1200; i++) {             // big branches take a minute or two to analyze
+    await new Promise(res => setTimeout(res, 1500));
+    let next;
+    try { next = await fetchReport(); } catch { continue; }
+    if (next._rebuilding) continue;
+    const label = switching;
+    switching = null;
+    if (next._switch_error) { renderTop(); toast(`Couldn't switch: ${next._switch_error}`); return; }
+    R = next; render(); window.scrollTo(0, 0);
+    toast(`Reviewing ${label}`);
+    if ((R.llm || {}).status === "running") poll();
+    return;
+  }
+  switching = null; renderTop();
+}
+
+document.addEventListener("mousedown", e => {
+  if (swOpen && !e.target.closest("#switcher") && !e.target.closest("#refbtn")) closeSwitcher();
+});
 
 async function fetchReport() {
   const r = await fetch("/api/report", { cache: "no-store" });
